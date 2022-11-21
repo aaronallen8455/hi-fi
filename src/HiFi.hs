@@ -1,3 +1,4 @@
+{-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -19,7 +20,8 @@ module HiFi
   -- * Plugin
   , plugin
   , indexArray
-  , RecArray
+  , type RecArray
+  , unsafeCoerceAny
   ) where
 
 import           Control.Monad
@@ -192,6 +194,7 @@ data PluginInputs =
     , instantiateName :: Ghc.Name
     , indexArrayId :: Ghc.Id
     , recArrayTyCon :: Ghc.TyCon
+    , unsafeCoerceAnyId :: Ghc.Id
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -206,6 +209,9 @@ type RecArray = A.Array Exts.Any
 indexArray :: RecArray -> Int -> Exts.Any
 indexArray = A.indexArray
 
+unsafeCoerceAny :: forall a. Exts.Any -> a
+unsafeCoerceAny = unsafeCoerce
+
 lookupInputs :: Ghc.TcPluginM PluginInputs
 lookupInputs = do
   hiFiMod <- findModule "HiFi"
@@ -216,7 +222,8 @@ lookupInputs = do
   foldFieldsName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FoldFields")
   instantiateName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "Instantiate")
   indexArrayId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "indexArray")
-  recArrayTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "indexArray")
+  recArrayTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "RecArray")
+  unsafeCoerceAnyId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "unsafeCoerceAny")
   pure MkPluginInputs{..}
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
@@ -246,21 +253,32 @@ tcSolver MkPluginInputs{..} _env _givens wanteds = do
          -- ToRecord
          | clsName == toRecordName
          , [ recordTy ] <- cc_tyargs
-         , Just (dataCon, _) <- getRecordFields recordTy
+         , Just (dataCon, fields) <- getRecordFields recordTy
          , Just arrType <- Ghc.synTyConRhs_maybe recArrayTyCon
          -> do
              arrBindName <- Ghc.unsafeTcPluginTcM
                           $ Ghc.newName (Ghc.mkOccName Ghc.varName "arr")
 
-             let numFields = fromIntegral $ Ghc.dataConSourceArity dataCon
-                 arrBind = Ghc.mkTyVar arrBindName arrType
-                 accessor ix =
-                   Ghc.mkCoreApps (Ghc.Var indexArrayId)
-                     [Ghc.Var arrBind, Ghc.mkUncheckedIntExpr ix]
+             let arrBind =
+                   Ghc.mkLocalVar
+                     Ghc.VanillaId
+                     arrBindName
+                     Ghc.Many
+                     arrType
+                     Ghc.vanillaIdInfo
+
+                 accessor fieldTy ix =
+                   Ghc.mkCoreApps (Ghc.Var unsafeCoerceAnyId)
+                     [ Ghc.Type fieldTy
+                     , Ghc.mkCoreApps (Ghc.Var indexArrayId)
+                         [Ghc.Var arrBind, Ghc.mkUncheckedIntExpr ix]
+                     ]
                  result =
                    Ghc.mkCoreLams [arrBind] $
                      Ghc.mkCoreConApps dataCon
-                       $ accessor <$> [0 .. numFields]
+                       $ do
+                         (fst . snd -> fieldTy, ix) <- fields `zip` [0..]
+                         [accessor fieldTy ix]
              pure $ Just (Ghc.EvExpr result, ct)
 
          | clsName == foldFieldsName ->
