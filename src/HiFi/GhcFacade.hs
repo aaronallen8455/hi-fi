@@ -12,3 +12,5 @@ import           GHC.Tc.Types.Constraint as Ghc
 import           GHC.Types.TyThing as Ghc
 import           GHC.Tc.Utils.Monad as Ghc hiding (getEnvs, getTopEnv, newUnique, getPrintUnqualified, getSrcSpanM)
 import           GHC.Types.Name as Ghc
+import           GHC.Core.Class as Ghc
+import           GHC.Core.Predicate as Ghc
