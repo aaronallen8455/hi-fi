@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ExplicitNamespaces #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE LambdaCase #-}
@@ -42,6 +43,8 @@ import           GHC.TypeLits
 import           Unsafe.Coerce (unsafeCoerce)
 
 import qualified HiFi.GhcFacade as Ghc
+
+import           Debug.Trace
 
 -- TODO type roles?
 newtype HKD rec f =
@@ -90,6 +93,13 @@ type FieldTypeCheck :: Symbol -> (Type -> Type) -> Type -> Type -> Constraint
 class FieldTypeCheck fieldName f recordTy userTy where
 
 instance FieldTypeCheck fieldName f a (f a)
+
+instance {-# INCOHERENT #-}
+  TypeError
+       (Text "Expected '" :<>: ShowType (f a)
+   :<>: Text "', got '" :<>: ShowType b
+   :<>: Text "' for field '" :<>: Text fieldName :<>: Text "'")
+  => FieldTypeCheck fieldName f a b
 
 --------------------------------------------------------------------------------
 -- API
@@ -213,7 +223,6 @@ data PluginInputs =
     , indexArrayId     :: !Ghc.Id
     , recArrayTyCon    :: !Ghc.TyCon
     , fieldNameName    :: !Ghc.Name
-    , fieldNameDataCon :: !Ghc.DataCon
     , arrayFromListId  :: !Ghc.Id
     , fieldTypeCheckClass :: !Ghc.Class
     }
@@ -246,8 +255,7 @@ lookupInputs = do
   recArrayTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "RecArray")
   fieldNameName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldName")
   arrayFromListId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "arrayFromList")
-  fieldNameDataCon <- Ghc.tcLookupDataCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkDataOcc "MkFieldName")
-  fieldTypeCheckClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkDataOcc "FieldTypeCheck")
+  fieldTypeCheckClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldTypeCheck")
   pure MkPluginInputs{..}
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
@@ -271,7 +279,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          , Just fields <- map (snd . snd) . snd <$> getRecordFields recordTy
          -> do
              selVars <- map Ghc.Var <$> traverse Ghc.tcLookupId fields
-             let funTy = Ghc.mkVisFunTyMany recordTy Ghc.anyTy
+             let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
              pure $ Just ((Ghc.EvExpr $ Ghc.mkListExpr funTy selVars, ct), [])
 
          -- ToRecord
@@ -285,32 +293,40 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
 
              let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.Many arrType
 
-                 accessor fieldTy ix =
+                 accessor ix =
                    Ghc.mkCoreApps (Ghc.Var indexArrayId)
                      [Ghc.Var arrBind, Ghc.mkUncheckedIntExpr ix]
                  result =
                    Ghc.mkCoreLams [arrBind] $
                      Ghc.mkCoreConApps dataCon
                        $ do
-                         (fst . snd -> fieldTy, ix) <- fields `zip` [0..]
-                         [accessor fieldTy ix]
+                         (_, ix) <- fields `zip` [0..]
+                         [accessor ix]
              pure $ Just ((Ghc.EvExpr result, ct), [])
 
          | clsName == foldFieldsName ->
            undefined
 
          | clsName == instantiateName
-         , [ getRecordFields -> Just (dataCon, fields)
+         , [ getRecordFields -> Just (_, fields)
            , effectCon
            , tupleTy
-           ] <- cc_tyargs
-         , Just (DL.toList -> tuplePairs) <- tupleTypeToFieldMap inp tupleTy -> do
+           ] <- cc_tyargs -> do
+             let fieldNames = fst <$> fields
+             -- TODO values in the tuple pair that are ambiguous, such as Nothing,
+             -- must be instantiated using the type from the record.
+             (tuplePairs, instantiateExpr)
+               <- gatherTupleFieldsAndBuildExpr inp fieldNames tupleTy
              let recordFieldMap = Ghc.listToUFM $ (fmap . fmap) fst fields
              mNewWanteds <-
-               mkFieldTypeCheckWanteds inp (Ghc.ctLoc ct) recordFieldMap tuplePairs effectCon
+               mkFieldTypeCheckWanteds
+                 inp
+                 (Ghc.ctLoc ct)
+                 recordFieldMap
+                 tuplePairs
+                 effectCon
              for mNewWanteds $ \newWanteds -> do
-               expr <- mkInstantiateExpr inp tupleTy tuplePairs $ fst <$> fields
-               pure ((Ghc.EvExpr expr, ct), newWanteds)
+               pure ((Ghc.EvExpr instantiateExpr, ct), newWanteds)
 
          | otherwise -> pure Nothing
     _ -> pure Nothing
@@ -355,78 +371,27 @@ mkFieldTypeCheckWanteds
   -> Ghc.Type -- effect constructor
   -> Ghc.TcPluginM (Maybe [Ghc.Ct])
 mkFieldTypeCheckWanteds inp ctLoc recordFieldMap tuplePairs effectCon = do
-  case getFieldMatchResults recordFieldMap tuplePairs of
-    Nothing -> pure Nothing
-    Just matchResults -> do
-      -- TODO generate error messages from missing or extra fields instead of just failing
-      let go = \case
-            Match labelFs recordTy tupleTy ->
-              Just $ do
-                -- let canLHS = Ghc.canEqLHS_maybe
-                let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
-                    classArgs = [fieldNameTy, effectCon, recordTy, tupleTy]
-                    pred = Ghc.mkClassPred (fieldTypeCheckClass inp) classArgs
-                evidence <- Ghc.newWanted ctLoc pred
-                pure Ghc.CDictCan
-                  { Ghc.cc_ev = evidence
-                  , Ghc.cc_class = fieldTypeCheckClass inp
-                  , Ghc.cc_tyargs = classArgs
-                  , Ghc.cc_pend_sc = False
-                  , Ghc.cc_fundeps = False
-                  }
+  let matchResults = getFieldMatchResults recordFieldMap tuplePairs
+  -- TODO generate error messages from missing or extra fields instead of just failing
+  let go = \case
+        Match labelFs recordTy tupleTy ->
+          Just $ do
+            -- let canLHS = Ghc.canEqLHS_maybe
+            let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
+                classArgs = [fieldNameTy, effectCon, recordTy, tupleTy]
+                classPred = Ghc.mkClassPred (fieldTypeCheckClass inp) classArgs
+            evidence <- Ghc.newWanted ctLoc classPred
+            pure Ghc.CDictCan
+              { Ghc.cc_ev = evidence
+              , Ghc.cc_class = fieldTypeCheckClass inp
+              , Ghc.cc_tyargs = classArgs
+              , Ghc.cc_pend_sc = False
+              , Ghc.cc_fundeps = False
+              }
 
-            Missing -> Nothing
-            Extra -> Nothing
-      traverse sequence . traverse go $ Ghc.nonDetEltsUFM matchResults
-
-mkInstantiateExpr
-  :: PluginInputs
-  -> Ghc.Type -- record type
-  -> Ghc.Type -- effect type
-  -> Ghc.Type -- tuple type
-  -> [(Ghc.FastString, Ghc.Type)] -- ^ tuple types
-  -> [Ghc.FastString] -- ^ field labels (in order)
-  -> Ghc.TcPluginM Ghc.CoreExpr
-mkInstantiateExpr inp recordTy effectTy tupleTy tupleFieldTys fieldLabels = do
-  (tupleExpr, ids) <- mkTupleExpr inp tupleFieldTys
-  let idsMap = Ghc.listToUFM $ zip (fst <$> tupleFieldTys) ids
-      fieldExprs = do
-        label <- fieldLabels
-        Just i <- [Ghc.lookupUFM idsMap label] -- invariant: lookup should never fail
-        [Ghc.Var i]
-  tupleName <- Ghc.unsafeTcPluginTcM
-             $ Ghc.newName (Ghc.mkOccName Ghc.varName "tuple")
-  let tupleBind = Ghc.mkLocalIdOrCoVar tupleName Ghc.Many tupleTy
-      resultTy = Ghc.mkTyConTy (recArrayTyCon inp)
-
-  -- need to build a case for each layer of the tuple
-  -- Is there no way to bind all the things without having to write cases for
-  -- each tuple constructor?
-  pure $ Ghc.mkCoreLams [tupleBind] $
-    Ghc.mkSingleAltCase
-      (Ghc.Var tupleBind)
-      (Ghc.mkWildValBinder Ghc.Many tupleTy)
-      (Ghc.DataAlt tupleCon)
-      ids
-      (Ghc.mkCoreApps (Ghc.Var $ arrayFromListId inp) fieldExprs)
-
-mkTupleExpr
-  :: PluginInputs
-  -> [(Ghc.FastString, Ghc.Type)]
-  -> Ghc.TcPluginM (Ghc.CoreExpr, [Ghc.Id])
-mkTupleExpr inp ((label, ty) : tupleTys) = do
-  (tailExpr, ids) <- mkTupleExpr inp tupleTys
-  argName <- Ghc.unsafeTcPluginTcM
-           $ Ghc.newName (Ghc.mkOccName Ghc.varName "arg")
-
-  let argId = Ghc.mkLocalIdOrCoVar argName Ghc.Many ty
-      labelExpr = Ghc.Type . Ghc.LitTy $ Ghc.StrTyLit label
-      fieldNameExpr = Ghc.mkCoreConApps (fieldNameDataCon inp) [labelExpr]
-      pairTuple = Ghc.mkCoreTup [fieldNameExpr, Ghc.Var argId]
-      resultExpr = Ghc.mkCoreTup [pairTuple, tailExpr]
-  pure (resultExpr, argId : ids)
-
-mkTupleExpr _ [] = pure (Ghc.unitExpr, [])
+        Missing -> Nothing
+        Extra -> Nothing
+  traverse sequence . traverse go $ Ghc.nonDetEltsUFM matchResults
 
 getFieldMatchResults
   :: Ghc.UniqFM Ghc.FastString Ghc.Type
@@ -449,24 +414,24 @@ getFieldMatchResults recordFieldMap tuplePairs = do
 gatherTupleFieldsAndBuildExpr
   :: PluginInputs
   -> [Ghc.FastString] -- field names in order
-  -> Ghc.Type
+  -> Ghc.Type -- tuple
   -> Ghc.TcPluginM ([(Ghc.FastString, Ghc.Type)], Ghc.CoreExpr)
-gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNames tupleTy = do
+gatherTupleFieldsAndBuildExpr MkPluginInputs{..} fieldNames tupleTy = do
     tupleName <- Ghc.unsafeTcPluginTcM
                $ Ghc.newName (Ghc.mkOccName Ghc.varName "tuple")
     let tupleBind = Ghc.mkLocalIdOrCoVar tupleName Ghc.Many tupleTy
 
-    Ghc.mkCoreLams [tupleBind]
-      <$> go [] tupleBind tupleTy
+    (pairs, expr) <- go [] tupleBind tupleTy
+    pure (pairs, Ghc.mkCoreLams [tupleBind] expr)
   where
     go ids tupleBind ty = case ty of
       Ghc.TyConApp tyCon [arg1Ty, arg2Ty]
         | Ghc.isAlgTyCon tyCon
         , Ghc.TupleTyCon{} <- Ghc.algTyConRhs tyCon ->
             case arg1Ty of
-              Ghc.TyConApp _ [fieldNameTy@(Ghc.TyConApp fieldNameTyCon fieldNameLit), fieldTy] -> do
-                guard $ Ghc.getName fieldNameTyCon == fieldNameName
-                [Ghc.LitTy (Ghc.StrTyLit fs)] <- pure fieldNameLit
+              Ghc.TyConApp _ [fieldNameTy@(Ghc.TyConApp fieldNameTyCon fieldNameLit), fieldTy]
+                | Ghc.getName fieldNameTyCon == fieldNameName
+                , [Ghc.LitTy (Ghc.StrTyLit fs)] <- fieldNameLit -> do
 
                 arg1VarName
                   <- Ghc.unsafeTcPluginTcM
@@ -487,7 +452,9 @@ gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNames tupleTy = do
                 let fieldVarId = Ghc.mkLocalIdOrCoVar fieldVarName Ghc.Many fieldTy
 
                 (resultIds, nextExpr)
-                  <- go ((fs, (fieldVarId, fieldTy)) : ids) arg2VarId arg2Ty
+                  <- go ((fs, (fieldVarId, fieldTy)) : ids)
+                        arg2VarId
+                        arg2Ty
 
                 let pairCase =
                       Ghc.mkSingleAltCase
@@ -514,12 +481,15 @@ gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNames tupleTy = do
         | tyCon == Ghc.unitTyCon
         -> do
           let idsMap = Ghc.listToUFM (map (fmap fst) ids)
+              fieldExprsInOrder :: [Ghc.CoreExpr]
               fieldExprsInOrder = do
                 label <- fieldNames
                 Just fieldId <- [Ghc.lookupUFM idsMap label] -- actual field validation is done elsewhere
                 [Ghc.Var fieldId]
+              fieldListExpr =
+                Ghc.mkListExpr (Ghc.anyTypeOfKind Ghc.liftedTypeKind) fieldExprsInOrder
               arrExpr =
-                Ghc.mkCoreApps (Ghc.Var arrayFromListId) fieldExprsInOrder
+                Ghc.mkCoreApps (Ghc.Var arrayFromListId) [fieldListExpr]
           pure (map (fmap snd) ids, arrExpr)
 
       _ -> fail "garbage input to 'gatherTupleFieldsAndBuildExpr'"

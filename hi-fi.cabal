@@ -46,3 +46,4 @@ executable test
   build-depends: base, hi-fi
   ghc-options: -fplugin HiFi
   default-language: GHC2021
+  default-extensions: OverloadedRecordDot
