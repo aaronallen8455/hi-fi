@@ -24,7 +24,8 @@ library
     -- other-extensions:
     build-depends:    base ^>=4.17.0.0,
                       ghc >= 9.2.0,
-                      primitive
+                      primitive,
+                      syb
     hs-source-dirs:   src
     default-language: GHC2021
 

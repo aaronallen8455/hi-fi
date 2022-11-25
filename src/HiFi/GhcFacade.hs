@@ -14,3 +14,13 @@ import           GHC.Tc.Utils.Monad as Ghc hiding (getEnvs, getTopEnv, newUnique
 import           GHC.Types.Name as Ghc
 import           GHC.Core.Class as Ghc
 import           GHC.Core.Predicate as Ghc
+import           Language.Haskell.Syntax.Expr as Ghc
+import           Language.Haskell.Syntax.Extension as Ghc
+import           Language.Haskell.Syntax.Type as Ghc
+import           Language.Haskell.Syntax.Pat as Ghc
+import           GHC.Hs.Extension as Ghc
+import           GHC.Types.SourceText as Ghc
+import           GHC.Hs.Type as Ghc
+import           GHC.Parser.Annotation as Ghc (noSrcSpanA, noLocA)
+import           GHC.Hs.Utils as Ghc
+import           GHC.Hs as Ghc (HsParsedModule(..), HsModule(..))
