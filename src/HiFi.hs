@@ -45,8 +45,6 @@ import           Unsafe.Coerce (unsafeCoerce)
 
 import qualified HiFi.GhcFacade as Ghc
 
-import           Debug.Trace
-
 -- TODO type roles?
 newtype HKD rec f =
   MkHKD (A.Array (f Exts.Any))
@@ -335,6 +333,17 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
 
   pure $ Ghc.TcPluginOk solved (concat newWanteds)
 
+-- | Instantiates free vars in the second type with args from the first. Used
+-- for ambiguous values such as 'Nothing' that would otherwise require a sig.
+subFreeVars :: Ghc.Type -> Ghc.Type -> Ghc.Type
+subFreeVars (Ghc.TyConApp recCon recArgs) tup@(Ghc.TyConApp tupCon tupArgs)
+  = if Ghc.getName recCon == Ghc.getName tupCon
+       then let args = uncurry subFreeVars <$> zip recArgs tupArgs
+             in Ghc.TyConApp tupCon args
+       else tup
+subFreeVars rec (Ghc.TyVarTy _) = rec
+subFreeVars _ tup = tup
+
 getStrTyLitVal :: Ghc.Type -> Maybe Ghc.FastString
 getStrTyLitVal = \case
   Ghc.LitTy (Ghc.StrTyLit fs) -> Just fs
@@ -380,7 +389,13 @@ mkFieldTypeCheckWanteds inp ctLoc recordFieldMap tuplePairs effectCon = do
           Just $ do
             -- let canLHS = Ghc.canEqLHS_maybe
             let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
-                classArgs = [fieldNameTy, effectCon, recordTy, tupleTy]
+                classArgs = [ fieldNameTy
+                            , effectCon
+                            , recordTy
+                            , subFreeVars
+                                (Ghc.mkAppTy effectCon recordTy)
+                                tupleTy
+                            ]
                 classPred = Ghc.mkClassPred (fieldTypeCheckClass inp) classArgs
             evidence <- Ghc.newWanted ctLoc classPred
             pure Ghc.CDictCan
