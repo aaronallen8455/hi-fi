@@ -2,7 +2,7 @@ module HiFi.GhcFacade
   ( module Ghc
   ) where
 
-import           GHC.Plugins as Ghc hiding (DefaultingPlugin, TcPlugin, varName)
+import           GHC.Plugins as Ghc hiding (DefaultingPlugin, TcPlugin, varName, substTy, isInScope, extendTvSubst)
 import           GHC.Tc.Types as Ghc
 import           GHC.Core.TyCo.Rep as Ghc
 import           GHC.Core.Reduction as Ghc
@@ -24,3 +24,7 @@ import           GHC.Hs.Type as Ghc
 import           GHC.Parser.Annotation as Ghc (noSrcSpanA, noLocA)
 import           GHC.Hs.Utils as Ghc
 import           GHC.Hs as Ghc (HsParsedModule(..), HsModule(..))
+import           GHC.Tc.Utils.TcType as Ghc
+import           GHC.Builtin.Names as Ghc
+import           GHC.Core.InstEnv as Ghc
+import           GHC.Tc.Instance.Class as Ghc
