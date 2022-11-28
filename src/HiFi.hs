@@ -28,7 +28,6 @@ module HiFi
 
 import           Control.Monad
 import           Control.Monad.ST
-import           Data.Bitraversable (bitraverse)
 import           Data.Coerce (coerce)
 import           Data.Either (partitionEithers)
 import           Data.Functor.Compose (Compose(..))
@@ -46,9 +45,8 @@ import           Unsafe.Coerce (unsafeCoerce)
 
 import qualified HiFi.GhcFacade as Ghc
 
-import           Debug.Trace
-
 -- TODO type roles?
+type HKD :: Type -> (Type -> Type) -> Type
 newtype HKD rec f =
   MkHKD (A.Array (f Exts.Any))
 
@@ -80,7 +78,6 @@ type FoldFields :: (Type -> Constraint) -> Type -> (Type -> Type) -> Constraint
 class FoldFields c rec f where
   foldFields :: forall acc x.
                 (forall a.
-                  -- should these be passed as Dicts?
                   c (f a) => String -> FieldType a -> (HKD rec f -> f a) -> x
                 )
              -> acc
@@ -235,6 +232,7 @@ data PluginInputs =
     , fieldTypeCheckClass :: !Ghc.Class
     , hasFieldClass       :: !Ghc.Class
     , knownSymbolClass    :: !Ghc.Class
+    , hkdTyCon            :: !Ghc.TyCon
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -271,6 +269,7 @@ lookupInputs = do
   fieldTypeCheckClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldTypeCheck")
   hasFieldClass <- Ghc.tcLookupClass Ghc.hasFieldClassName
   knownSymbolClass <- Ghc.tcLookupClass Ghc.knownSymbolClassName
+  hkdTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HKD")
   pure MkPluginInputs{..}
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
@@ -563,92 +562,81 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
   fieldGenName <- Ghc.unsafeTcPluginTcM
                 $ Ghc.newName (Ghc.mkOccName Ghc.varName "fieldGen")
 
-  nameTyVarName <- Ghc.unsafeTcPluginTcM
-                 $ Ghc.newName (Ghc.mkOccName Ghc.varName "name")
   fieldTyVarName <- Ghc.unsafeTcPluginTcM
                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "a")
   accumulatorName <- Ghc.unsafeTcPluginTcM
                    $ Ghc.newName (Ghc.mkOccName Ghc.varName "accumulator")
   initAccName <- Ghc.unsafeTcPluginTcM
                $ Ghc.newName (Ghc.mkOccName Ghc.varName "initAcc")
+  hkdName <- Ghc.unsafeTcPluginTcM
+           $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
 
-  let symbolKind = Ghc.mkTyConTy Ghc.typeSymbolKindCon
-      fieldTyVar = Ghc.mkTyVar fieldTyVarName symbolKind
-      nameTyVar = Ghc.mkTyVar nameTyVarName symbolKind
+  let fieldTyVar = Ghc.mkTyVar fieldTyVarName Ghc.liftedTypeKind
       accTyVar = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
       xTyVar = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
 
+      hkdTy = Ghc.mkTyConApp hkdTyCon [recordTy, effectConTy]
       fieldGenTy = Ghc.mkSigmaTy forallBndrs preds tyBody
         where
-          forallBndrs =
-            [ Ghc.mkTyCoVarBinder Ghc.Required nameTyVar
-            , Ghc.mkTyCoVarBinder Ghc.Required fieldTyVar
-            ]
-          preds = [ Ghc.mkClassPred predClass [Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]]
-                  , Ghc.mkClassPred hasFieldClass [symbolKind, Ghc.mkTyVarTy nameTyVar, recordTy, Ghc.mkTyVarTy fieldTyVar]
-                  , Ghc.mkClassPred knownSymbolClass [Ghc.mkTyVarTy nameTyVar]
-                  , Ghc.mkClassPred indexOfFieldClass [Ghc.mkTyVarTy nameTyVar, recordTy]
-                  ]
-          tyBody = Ghc.mkTyConApp fieldNameTyCon [Ghc.mkTyVarTy nameTyVar]
+          forallBndrs = [ Ghc.mkTyCoVarBinder Ghc.Required fieldTyVar ]
+          preds = [ Ghc.mkClassPred predClass [Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]] ]
+          tyBody = Ghc.stringTy
                  `Ghc.mkVisFunTyMany`
                    Ghc.mkTyConApp fieldTypeTyCon [Ghc.mkTyVarTy fieldTyVar]
+                 `Ghc.mkVisFunTyMany`
+                   ( hkdTy
+                   `Ghc.mkVisFunTyMany`
+                     Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]
+                   )
                  `Ghc.mkVisFunTyMany`
                    Ghc.mkTyVarTy xTyVar
       fieldGenBndr = Ghc.mkLocalIdOrCoVar fieldGenName Ghc.Many fieldGenTy
       initAccBndr = Ghc.mkLocalIdOrCoVar initAccName Ghc.Many (Ghc.mkTyVarTy accTyVar)
+
       accumulatorTy = Ghc.mkTyVarTy xTyVar
                     `Ghc.mkVisFunTyMany`
                       Ghc.mkTyVarTy accTyVar
                     `Ghc.mkVisFunTyMany`
                       Ghc.mkTyVarTy accTyVar
+
       accumulatorBndr = Ghc.mkLocalIdOrCoVar accumulatorName Ghc.Many accumulatorTy
 
       accTyVarBndr = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
       xTyVarBndr = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
+      hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
 
-  traceM "hello1"
-  instEnvs <- Ghc.getInstEnvs
-
-  let mkFieldGenExpr :: (Integer, (Ghc.FastString, Ghc.Type)) -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
+  let mkFieldGenExpr :: (Integer, (Ghc.FastString, Ghc.Type)) -> Ghc.TcPluginM (Either Ghc.Ct Ghc.CoreExpr)
       mkFieldGenExpr (idx, (fieldName, fieldTy)) = do
-        let indexOfFieldDict = Ghc.mkUncheckedIntExpr idx
-            fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit fieldName
-            fieldNameExpr = Ghc.mkCoreConApps mkFieldNameDataCon [Ghc.Type fieldNameTy]
-            fieldTypeExpr = Ghc.mkCoreConApps mkFieldTypeDataCon [Ghc.Type fieldTy]
+        stringIds <- Ghc.getMkStringIds Ghc.tcLookupId
+        let fieldNameExpr = Ghc.mkStringExprFSWith stringIds fieldName
+        let fieldTypeExpr = Ghc.mkCoreConApps mkFieldTypeDataCon [Ghc.Type fieldTy]
+            getterExpr =
+              Ghc.mkCoreLams [hkdBndr] $
+                Ghc.mkCoreApps (Ghc.Var indexArrayId)
+                               [Ghc.Var hkdBndr, Ghc.mkUncheckedIntExpr idx]
             predClassArgs = [Ghc.mkAppTys effectConTy [fieldTy]]
-            hasFieldArgs = [symbolKind, fieldNameTy, recordTy, fieldTy]
-            knownSymbolArgs = [fieldNameTy]
 
-        -- need to use matchGlobalInst?
-        dflags <- Ghc.unsafeTcPluginTcM Ghc.getDynFlags
-        x <- Ghc.unsafeTcPluginTcM $ Ghc.matchGlobalInst dflags False hasFieldClass hasFieldArgs
-        y <- Ghc.unsafeTcPluginTcM $ Ghc.matchGlobalInst dflags False knownSymbolClass knownSymbolArgs
-        traceM $ Ghc.showSDocUnsafe $ Ghc.ppr (x, y)
+        predCt <- makeWantedCt ctLoc predClass predClassArgs
 
-        ePredDict <-
-          bitraverse (const $ makeWantedCt ctLoc predClass predClassArgs)
-                     (pure . Ghc.instanceDFunId . fst)
-          $ Ghc.lookupUniqueInstEnv instEnvs predClass predClassArgs
-        eHasFieldDict <-
-          bitraverse (const $ makeWantedCt ctLoc hasFieldClass hasFieldArgs)
-                     (pure . Ghc.instanceDFunId . fst)
-          $ Ghc.lookupUniqueInstEnv instEnvs hasFieldClass hasFieldArgs
-        eKnownSymbolDict <-
-          bitraverse (const $ makeWantedCt ctLoc knownSymbolClass knownSymbolArgs)
-                     (pure . Ghc.instanceDFunId . fst)
-          $ Ghc.lookupUniqueInstEnv instEnvs knownSymbolClass knownSymbolArgs
+        (_, evBindMap)
+          <- Ghc.unsafeTcPluginTcM
+           . Ghc.runTcS
+           . Ghc.solveSimpleWanteds
+           $ Ghc.singleCt predCt
 
-        pure $ case partitionEithers [ePredDict, eHasFieldDict, eKnownSymbolDict] of
-          ([], dicts) -> Right $
-            Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
-              [ Ghc.Type fieldNameTy
-              , Ghc.Type fieldTy
-              ] ++ (Ghc.Var <$> dicts) ++
-              [ indexOfFieldDict
-              , fieldNameExpr
+        let evVar = Ghc.ctEvEvId $ Ghc.ctEvidence predCt
+            mPredDict = buildEvExprFromMap evVar evBindMap
+
+        pure $ case mPredDict of
+          Just predDict ->
+            Right . Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
+              [ Ghc.Type fieldTy
+              ] ++ [predDict] ++
+              [ fieldNameExpr
               , fieldTypeExpr
+              , getterExpr
               ]
-          (wanteds, _) -> Left wanteds
+          Nothing -> Left predCt
 
       lamArgs = [ accTyVarBndr
                 , xTyVarBndr
@@ -658,8 +646,6 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
                 ]
 
   result <- traverse mkFieldGenExpr (zip [0..] fields)
-  -- traceM $ Ghc.showSDocUnsafe $ Ghc.ppr result
-  traceM "hello2"
   case partitionEithers result of
     ([], fieldGenExprs) -> do
       bodyExpr <- Ghc.unsafeTcPluginTcM $
@@ -670,7 +656,20 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
                         (Ghc.mkListExpr (Ghc.mkTyVarTy xTyVar) fieldGenExprs)
 
       pure . Right $ Ghc.mkCoreLams lamArgs bodyExpr
-    (wanteds, _) -> pure . Left $ concat wanteds
+    (wanteds, _) -> pure $ Left wanteds
+
+evExprFromEvTerm :: Ghc.EvTerm -> Ghc.EvExpr
+evExprFromEvTerm (Ghc.EvExpr x) = x
+evExprFromEvTerm _ = error "invalid argument to evExprFromEvTerm"
+
+buildEvExprFromMap :: Ghc.EvVar -> Ghc.EvBindMap -> Maybe Ghc.EvExpr
+buildEvExprFromMap evVar evBindMap =
+  let evBinds = Ghc.dVarEnvElts $ Ghc.ev_bind_varenv evBindMap
+   in case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
+        ([m], rest) -> Just $
+          let go x = Ghc.bindNonRec (Ghc.eb_lhs x) (evExprFromEvTerm $ Ghc.eb_rhs x)
+           in foldr go (evExprFromEvTerm $ Ghc.eb_rhs m) rest
+        _ -> Nothing
 
 --------------------------------------------------------------------------------
 -- Parse result action
