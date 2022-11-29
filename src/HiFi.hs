@@ -608,7 +608,9 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
       fieldGenTy = Ghc.mkSigmaTy forallBndrs preds tyBody
         where
           forallBndrs = [ Ghc.mkTyCoVarBinder Ghc.Required fieldTyVar ]
-          preds = [ Ghc.mkClassPred predClass [Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]] ]
+          preds = [ Ghc.mkClassPred predClass
+                      [Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]]
+                  ]
           tyBody = Ghc.stringTy
                  `Ghc.mkVisFunTyMany`
                    Ghc.mkTyConApp fieldTypeTyCon [Ghc.mkTyVarTy fieldTyVar]
@@ -634,7 +636,9 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
       xTyVarBndr = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
       hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
 
-  let mkFieldGenExpr :: (Integer, (Ghc.FastString, Ghc.Type)) -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
+  let mkFieldGenExpr
+        :: (Integer, (Ghc.FastString, Ghc.Type))
+        -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
       mkFieldGenExpr (idx, (fieldName, fieldTy)) = do
         stringIds <- Ghc.getMkStringIds Ghc.tcLookupId
         let fieldNameExpr = Ghc.mkStringExprFSWith stringIds fieldName
@@ -685,9 +689,9 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
       pure . Right $ Ghc.mkCoreLams lamArgs bodyExpr
     (wanteds, _) -> pure . Left $ concat wanteds
 
-evExprFromEvTerm :: Ghc.EvTerm -> Ghc.EvExpr
-evExprFromEvTerm (Ghc.EvExpr x) = x
-evExprFromEvTerm _ = error "invalid argument to evExprFromEvTerm"
+evExprFromEvTerm :: Ghc.EvTerm -> Maybe Ghc.EvExpr
+evExprFromEvTerm (Ghc.EvExpr x) = Just x
+evExprFromEvTerm _ = Nothing
 
 -- | The output of solving wanted contains references to variables that are not
 -- in scope so an expr must be constructed that binds those variables locally.
@@ -701,10 +705,12 @@ buildEvExprFromMap
 buildEvExprFromMap ctLoc evVar evBindMap =
   let evBinds = Ghc.dVarEnvElts $ Ghc.ev_bind_varenv evBindMap
       mResult = case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
-        ([m], rest) -> Just $
-          let go acc x =
-                Ghc.bindNonRec (Ghc.eb_lhs x) (evExprFromEvTerm $ Ghc.eb_rhs x) acc
-           in List.foldl' go (evExprFromEvTerm $ Ghc.eb_rhs m) rest
+        ([m], rest) -> do
+          baseDict <- evExprFromEvTerm $ Ghc.eb_rhs m
+          let go acc x = do
+                evExpr <- evExprFromEvTerm $ Ghc.eb_rhs x
+                Just $ Ghc.bindNonRec (Ghc.eb_lhs x) evExpr acc
+           in foldM go baseDict rest
         _ -> Nothing
    in case mResult of
         Nothing -> do
@@ -736,7 +742,7 @@ mkNewWantedFromExpr ctLoc evVar
 
 parseResultAction :: Ghc.ModSummary -> Ghc.ParsedResult -> Ghc.Hsc Ghc.ParsedResult
 parseResultAction _modSummary parsedResult = do
-  -- TODO check if source code mentions mkHKD before doing a traversal
+  -- TODO check if source code actually contains "mkHKD" before doing a traversal
   let parsedModule = Ghc.parsedResultModule parsedResult
       applyTransform mo =
         mo { Ghc.hsmodDecls = Syb.everywhere (Syb.mkT transformMkHKD)
@@ -748,14 +754,20 @@ parseResultAction _modSummary parsedResult = do
 
 transformMkHKD :: Ghc.HsExpr Ghc.GhcPs -> Ghc.HsExpr Ghc.GhcPs
 transformMkHKD = \case
-  Ghc.RecordUpd{..}
-    | Ghc.HsVar _ (Ghc.unLoc -> updVar) <- Ghc.unLoc rupd_expr
-    , extractName updVar == Ghc.mkFastString "mkHKD"
-    , Left fields <- rupd_flds
-    -> let fieldPairs = getFieldPair . Ghc.unLoc <$> fields
-           tuple = mkTupleFromFields fieldPairs
-        in Ghc.unLoc $ Ghc.nlHsApp rupd_expr tuple
-  other -> other
+    Ghc.RecordUpd{..}
+      | checkExpr (Ghc.unLoc rupd_expr)
+      , Left fields <- rupd_flds
+      -> let fieldPairs = getFieldPair . Ghc.unLoc <$> fields
+             tuple = mkTupleFromFields fieldPairs
+          in Ghc.unLoc $ Ghc.nlHsApp rupd_expr tuple
+    other -> other
+  where
+    checkExpr = \case
+      Ghc.HsVar _ (Ghc.unLoc -> updVar)
+        | extractName updVar == Ghc.mkFastString "mkHKD"
+        -> True
+      Ghc.HsAppType _ expr _ -> checkExpr $ Ghc.unLoc expr
+      _ -> False
 
 getFieldPair
   :: Ghc.HsRecUpdField Ghc.GhcPs
