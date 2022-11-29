@@ -30,12 +30,13 @@ import           Control.Monad
 import           Control.Monad.ST
 import           Data.Coerce (coerce)
 import           Data.Either (partitionEithers)
+import           Data.Functor ((<&>))
 import           Data.Functor.Compose (Compose(..))
 import           Data.Functor.Identity (Identity(..))
 import qualified Data.Generics as Syb
 import           Data.Kind
 import qualified Data.List as List
-import           Data.Maybe (catMaybes)
+import           Data.Maybe (catMaybes, maybeToList)
 import qualified Data.Primitive.Array as A
 import           Data.Traversable (for)
 import qualified GHC.Exts as Exts
@@ -271,7 +272,7 @@ lookupInputs = do
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
 tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
-  (mSolved, newWanteds) <- fmap unzip . for wanteds $ \case
+  results <- for wanteds $ \case
     ct@Ghc.CDictCan{ cc_class, cc_tyargs } -> do
       let clsName = Ghc.getName cc_class
 
@@ -279,12 +280,13 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
       if | clsName == Ghc.getName indexOfFieldClass
          , [ getStrTyLitVal -> Just fieldName
            , fmap (map fst . snd) . getRecordFields -> Just fields
-           ] <- cc_tyargs -> pure
+           ] <- cc_tyargs -> pure $ Just
              ( do
                ix <- List.elemIndex fieldName fields
                let expr = Ghc.mkUncheckedIntExpr $ fromIntegral ix
-               Just (Ghc.EvExpr expr, ct)
+               Just $ Ghc.EvExpr expr
              , []
+             , ct
              )
 
          -- FieldGetters
@@ -294,7 +296,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -> do
              selVars <- map Ghc.Var <$> traverse Ghc.tcLookupId fields
              let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
-             pure (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy selVars, ct), [])
+             pure $ Just (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy selVars), [], ct)
 
          -- ToRecord
          | clsName == toRecordName
@@ -316,7 +318,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                        $ do
                          (_, ix) <- fields `zip` [0..]
                          [accessor ix]
-             pure (Just (Ghc.EvExpr result, ct), [])
+             pure $ Just (Just (Ghc.EvExpr result), [], ct)
 
          | clsName == foldFieldsName
          , [ predConTy, recordTy, effectConTy ] <- cc_tyargs
@@ -332,8 +334,8 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                     predClass
                     (map (fmap fst) fields)
              pure $ case result of
-               Left newWanteds -> (Nothing, newWanteds)
-               Right expr -> (Just (Ghc.EvExpr expr, ct), [])
+               Left newWanteds -> Just (Nothing, newWanteds, ct)
+               Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
 
          | clsName == instantiateName
          , [ getRecordFields -> Just (_, fields)
@@ -352,14 +354,34 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                  tuplePairs
                  effectCon
              pure $ case mNewWanteds of
-               Nothing -> (Nothing, [])
+               Nothing -> Nothing
                Just newWanteds ->
-                 (Just (Ghc.EvExpr instantiateExpr, ct), newWanteds)
+                 Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
 
-         | otherwise -> pure (Nothing, [])
-    _ -> pure (Nothing, [])
+         | otherwise -> pure Nothing
+    _ -> pure Nothing
 
-  pure $ Ghc.TcPluginOk (catMaybes mSolved) (concat newWanteds)
+  let newWanteds = do
+        Just (Just _, ws, _) <- results
+        ws
+      insolubles = do
+        Just (Nothing, ws, _) <- results
+        ws
+      solveds = do
+        Just (mR, _, ct) <- results
+        case mR of
+          Nothing | not (null insolubles) ->
+            -- Emit a bogus dict if there are insoluables, otherwise they
+            -- don't get reported.
+            [(Ghc.EvExpr Ghc.unitExpr, ct)]
+          Just r -> [(r, ct)]
+          _ -> []
+
+  pure Ghc.TcPluginSolveResult
+    { tcPluginInsolubleCts = insolubles
+    , tcPluginSolvedCts = solveds
+    , tcPluginNewCts = newWanteds
+    }
 
 -- | Instantiates free vars in the second type with args from the first. Used
 -- for ambiguous values such as 'Nothing' that would otherwise require a sig.
@@ -602,7 +624,7 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
       xTyVarBndr = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
       hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
 
-  let mkFieldGenExpr :: (Integer, (Ghc.FastString, Ghc.Type)) -> Ghc.TcPluginM (Either Ghc.Ct Ghc.CoreExpr)
+  let mkFieldGenExpr :: (Integer, (Ghc.FastString, Ghc.Type)) -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
       mkFieldGenExpr (idx, (fieldName, fieldTy)) = do
         stringIds <- Ghc.getMkStringIds Ghc.tcLookupId
         let fieldNameExpr = Ghc.mkStringExprFSWith stringIds fieldName
@@ -622,18 +644,16 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
            $ Ghc.singleCt predCt
 
         let evVar = Ghc.ctEvEvId $ Ghc.ctEvidence predCt
-            mPredDict = buildEvExprFromMap evVar evBindMap
+        ePredDict <- buildEvExprFromMap ctLoc evVar evBindMap
 
-        pure $ case mPredDict of
-          Just predDict ->
-            Right . Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
-              [ Ghc.Type fieldTy
-              ] ++ [predDict] ++
-              [ fieldNameExpr
-              , fieldTypeExpr
-              , getterExpr
-              ]
-          Nothing -> Left predCt
+        pure $ ePredDict <&> \predDict ->
+          Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
+            [ Ghc.Type fieldTy
+            ] ++ [predDict] ++
+            [ fieldNameExpr
+            , fieldTypeExpr
+            , getterExpr
+            ]
 
       lamArgs = [ accTyVarBndr
                 , xTyVarBndr
@@ -653,7 +673,7 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
                         (Ghc.mkListExpr (Ghc.mkTyVarTy xTyVar) fieldGenExprs)
 
       pure . Right $ Ghc.mkCoreLams lamArgs bodyExpr
-    (wanteds, _) -> pure $ Left wanteds
+    (wanteds, _) -> pure . Left $ concat wanteds
 
 evExprFromEvTerm :: Ghc.EvTerm -> Ghc.EvExpr
 evExprFromEvTerm (Ghc.EvExpr x) = x
@@ -663,8 +683,12 @@ evExprFromEvTerm _ = error "invalid argument to evExprFromEvTerm"
 -- in scope so an expr must be constructed that binds those variables locally.
 -- The solver seems to always output them in reverse dependency order, hence
 -- using a left fold to build the bindings.
-buildEvExprFromMap :: Ghc.EvVar -> Ghc.EvBindMap -> Maybe Ghc.EvExpr
-buildEvExprFromMap evVar evBindMap =
+buildEvExprFromMap
+  :: Ghc.CtLoc
+  -> Ghc.EvVar
+  -> Ghc.EvBindMap
+  -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.EvExpr)
+buildEvExprFromMap ctLoc evVar evBindMap =
   let evBinds = Ghc.dVarEnvElts $ Ghc.ev_bind_varenv evBindMap
       mResult = case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
         ([m], rest) -> Just $
@@ -672,10 +696,29 @@ buildEvExprFromMap evVar evBindMap =
                 Ghc.bindNonRec (Ghc.eb_lhs x) (evExprFromEvTerm $ Ghc.eb_rhs x) acc
            in List.foldl' go (evExprFromEvTerm $ Ghc.eb_rhs m) rest
         _ -> Nothing
-   in do
-     result <- mResult
-     guard . Ghc.isEmptyUniqSet $ Ghc.exprFreeVars result
-     Just result
+   in case mResult of
+        Nothing -> do
+          mCt <- mkNewWantedFromExpr ctLoc evVar
+          pure . Left $ maybeToList mCt
+        Just result -> do
+          let freeVars = Ghc.exprFreeVars result
+          if Ghc.isEmptyUniqSet freeVars
+             then pure $ Right result
+             else do
+               mCts <- traverse (mkNewWantedFromExpr ctLoc)
+                                (Ghc.nonDetEltsUniqSet freeVars)
+               pure . Left $ catMaybes mCts
+
+mkNewWantedFromExpr
+  :: Ghc.CtLoc
+  -> Ghc.EvVar
+  -> Ghc.TcPluginM (Maybe Ghc.Ct)
+mkNewWantedFromExpr ctLoc evVar
+  | let exprTy = Ghc.exprType (Ghc.Var evVar)
+  , Just (tyCon, args) <- Ghc.tcSplitTyConApp_maybe exprTy
+  , Just cls <- Ghc.tyConClass_maybe tyCon
+  = Just <$> makeWantedCt ctLoc cls args
+  | otherwise = pure Nothing
 
 --------------------------------------------------------------------------------
 -- Parse result action
