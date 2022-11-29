@@ -18,6 +18,7 @@ module HiFi
   , recZipWith
   , setField
   , fill
+  , atField
   -- * Plugin
   , plugin
   , indexArray
@@ -150,8 +151,17 @@ setField val (MkHKD arr) = MkHKD $ runST $ do
   A.unsafeFreezeArray marr
 
 -- TODO should this be parameterized over a constraint?
+-- | Instantiate a HKD using the same value for every field.
 fill :: forall rec f. FieldGetters rec => (forall a. f a) -> HKD rec f
 fill x = MkHKD . A.arrayFromList $ unsafeCoerce x <$ fieldGetters @rec
+
+-- | A lens focusing a specific field in a HKD.
+atField :: forall (name :: Symbol) rec effect f a
+         . (HasField name rec a, IndexOfField name rec, Functor f)
+        => (effect a -> f (effect a))
+        -> HKD rec effect -> f (HKD rec effect)
+atField afa rec =
+  flip (setField @name) rec <$> afa (getField @name rec)
 
 --------------------------------------------------------------------------------
 -- Instances
