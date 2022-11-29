@@ -45,15 +45,9 @@ import           Unsafe.Coerce (unsafeCoerce)
 
 import qualified HiFi.GhcFacade as Ghc
 
--- TODO type roles?
 type HKD :: Type -> (Type -> Type) -> Type
 newtype HKD rec f =
   MkHKD (A.Array (f Exts.Any))
-
-instance (HasField (name :: Symbol) rec a, IndexOfField name rec)
-    => HasField name (HKD rec f) (f a) where
-  getField (MkHKD arr) =
-    unsafeCoerce $ A.indexArray arr (indexOfField @name @rec)
 
 --------------------------------------------------------------------------------
 -- Magic type classes
@@ -183,18 +177,21 @@ instance FoldFields Eq rec f => Eq (HKD rec f) where
     let go _ _ getter = getter a == getter b
      in foldFields @Eq @rec @f go True (&&)
 
--- How to instantiate using record syntax?
--- Rewrite the record syntax as a tuple of tuples:
--- mkHKD @Rec @f ( ("fieldName", value)
---               , (..)
---               )
--- Can then do some form of type checking in the magic type class. Hopefully
--- there will be some way of emitting errors from the type checker plugin.
---
--- What about nested fields? Could have a magic type family that decides
--- whether to return `f a` or `f (HKD a f)`. Definitely complicates things
--- though and might be better left out for now. Higgledy does not do deep
--- conversion so maybe it is not required to be competitive?
+instance FoldFields Show rec f => Show (HKD rec f) where
+  show rec =
+    let go fieldName _ getter =
+          fieldName <> " = " <> show (getter rec)
+     in "HKD {" <> List.intercalate ", " (foldFields @Show @rec @f go [] (:)) <> "}"
+
+instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
+  compare a b =
+    let go _ _ getter = compare (getter a) (getter b)
+     in foldFields @Ord @rec @f go mempty (<>)
+
+instance (HasField (name :: Symbol) rec a, IndexOfField name rec)
+    => HasField name (HKD rec f) (f a) where
+  getField (MkHKD arr) =
+    unsafeCoerce $ A.indexArray arr (indexOfField @name @rec)
 
 --------------------------------------------------------------------------------
 -- Plugin
@@ -662,14 +659,23 @@ evExprFromEvTerm :: Ghc.EvTerm -> Ghc.EvExpr
 evExprFromEvTerm (Ghc.EvExpr x) = x
 evExprFromEvTerm _ = error "invalid argument to evExprFromEvTerm"
 
+-- | The output of solving wanted contains references to variables that are not
+-- in scope so an expr must be constructed that binds those variables locally.
+-- The solver seems to always output them in reverse dependency order, hence
+-- using a left fold to build the bindings.
 buildEvExprFromMap :: Ghc.EvVar -> Ghc.EvBindMap -> Maybe Ghc.EvExpr
 buildEvExprFromMap evVar evBindMap =
   let evBinds = Ghc.dVarEnvElts $ Ghc.ev_bind_varenv evBindMap
-   in case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
+      mResult = case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
         ([m], rest) -> Just $
-          let go x = Ghc.bindNonRec (Ghc.eb_lhs x) (evExprFromEvTerm $ Ghc.eb_rhs x)
-           in foldr go (evExprFromEvTerm $ Ghc.eb_rhs m) rest
+          let go acc x =
+                Ghc.bindNonRec (Ghc.eb_lhs x) (evExprFromEvTerm $ Ghc.eb_rhs x) acc
+           in List.foldl' go (evExprFromEvTerm $ Ghc.eb_rhs m) rest
         _ -> Nothing
+   in do
+     result <- mResult
+     guard . Ghc.isEmptyUniqSet $ Ghc.exprFreeVars result
+     Just result
 
 --------------------------------------------------------------------------------
 -- Parse result action
