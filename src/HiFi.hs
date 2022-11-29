@@ -67,7 +67,7 @@ class FieldGetters rec where
 -- Might be easier to construct an rn expr and then typecheck and desugar it.
 -- Core might be easier because won't have to deal with coercions
 class ToRecord rec where
-  toRecord' :: A.Array Exts.Any -> rec
+  toRecord' :: RecArray -> rec
 
 -- | Right fold over the fields of a record
 type FoldFields :: (Type -> Constraint) -> Type -> (Type -> Type) -> Constraint
@@ -766,6 +766,7 @@ transformMkHKD = \case
       Ghc.HsVar _ (Ghc.unLoc -> updVar)
         | extractName updVar == Ghc.mkFastString "mkHKD"
         -> True
+      Ghc.HsPar _ _ expr _ -> checkExpr $ Ghc.unLoc expr
       Ghc.HsAppType _ expr _ -> checkExpr $ Ghc.unLoc expr
       _ -> False
 
