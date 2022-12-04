@@ -87,7 +87,8 @@ class Instantiate rec f tuple where
 type FieldTypeCheck :: Symbol -> (Type -> Type) -> Type -> Type -> Constraint
 class FieldTypeCheck fieldName f recordTy userTy where
 
-instance FieldTypeCheck fieldName f a (f a)
+-- This equality constraint helps resolve ambiguous terms such as literals and Nothing
+instance a ~ b => FieldTypeCheck fieldName f a (f b)
 
 instance {-# INCOHERENT #-}
   TypeError
@@ -393,17 +394,6 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
     , tcPluginNewCts = newWanteds
     }
 
--- | Instantiates free vars in the second type with args from the first. Used
--- for ambiguous values such as 'Nothing' that would otherwise require a sig.
-subFreeVars :: Ghc.Type -> Ghc.Type -> Ghc.Type
-subFreeVars (Ghc.TyConApp recCon recArgs) tup@(Ghc.TyConApp tupCon tupArgs)
-  = if Ghc.getName recCon == Ghc.getName tupCon
-       then let args = uncurry subFreeVars <$> zip recArgs tupArgs
-             in Ghc.TyConApp tupCon args
-       else tup
-subFreeVars rec (Ghc.TyVarTy _) = rec
-subFreeVars _ tup = tup
-
 getStrTyLitVal :: Ghc.Type -> Maybe Ghc.FastString
 getStrTyLitVal = \case
   Ghc.LitTy (Ghc.StrTyLit fs) -> Just fs
@@ -451,9 +441,7 @@ mkFieldTypeCheckWanteds inp ctLoc recordFieldMap tuplePairs effectCon = do
                 classArgs = [ fieldNameTy
                             , effectCon
                             , recordTy
-                            , subFreeVars
-                                (Ghc.mkAppTy effectCon recordTy)
-                                tupleTy
+                            , tupleTy
                             ]
             makeWantedCt ctLoc (fieldTypeCheckClass inp) classArgs
 
