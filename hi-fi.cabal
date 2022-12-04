@@ -19,8 +19,11 @@ common warnings
 library
     import:           warnings
     exposed-modules:  HiFi,
-                      HiFi.GhcFacade
-    -- other-modules:
+                      HiFi.Internal.Types
+    other-modules: HiFi.GhcFacade,
+                   HiFi.Api,
+                   HiFi.TcPlugin,
+                   HiFi.ParseResultAction
     -- other-extensions:
     build-depends:    base ^>=4.17.0.0,
                       ghc >= 9.2.0,
