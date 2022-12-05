@@ -81,7 +81,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- IndexOfField
       if | clsName == Ghc.getName indexOfFieldClass
          , [ getStrTyLitVal -> Just fieldName
-           , fmap (map fst . snd) . getRecordFields -> Just fields
+           , fmap (map fst . recordFields) . getRecordFields -> Just fields
            ] <- cc_tyargs -> pure $ Just
              ( do
                ix <- List.elemIndex fieldName fields
@@ -94,7 +94,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- FieldGetters
          | clsName == fieldGettersName
          , [ recordTy ] <- cc_tyargs
-         , Just fields <- map (snd . snd) . snd <$> getRecordFields recordTy
+         , Just fields <- map (snd . snd) . recordFields <$> getRecordFields recordTy
          -> do
              selVars <- map Ghc.Var <$> traverse Ghc.tcLookupId fields
              let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
@@ -103,7 +103,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- ToRecord
          | clsName == toRecordName
          , [ recordTy ] <- cc_tyargs
-         , Just (dataCon, fields) <- getRecordFields recordTy
+         , Just RecordParts{..} <- getRecordFields recordTy
          , Just arrType <- Ghc.synTyConRhs_maybe recArrayTyCon
          -> do
              arrBindName <- Ghc.unsafeTcPluginTcM
@@ -116,16 +116,16 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                      [Ghc.Var arrBind, Ghc.mkUncheckedIntExpr ix]
                  result =
                    Ghc.mkCoreLams [arrBind] $
-                     Ghc.mkCoreConApps dataCon
-                       $ do
-                         (_, ix) <- fields `zip` [0..]
-                         [accessor ix]
+                     Ghc.mkCoreConApps recordCon
+                       $ (Ghc.Type <$> recordTyArgs) ++ do
+                           (_, ix) <- recordFields `zip` [0..]
+                           [accessor ix]
              pure $ Just (Just (Ghc.EvExpr result), [], ct)
 
          | clsName == foldFieldsName
          , [ predConTy, recordTy, effectConTy ] <- cc_tyargs
          , Just predTyCon <- Ghc.tyConAppTyCon_maybe predConTy
-         , Just (_, fields) <- getRecordFields recordTy -> do
+         , Just fields <- recordFields <$> getRecordFields recordTy -> do
              predClass <- Ghc.tcLookupClass $ Ghc.getName predTyCon
              result
                <- buildFoldFieldsExpr
@@ -140,7 +140,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
 
          | clsName == instantiateName
-         , [ getRecordFields -> Just (_, fields)
+         , [ fmap recordFields . getRecordFields -> Just fields
            , effectCon
            , tupleTy
            ] <- cc_tyargs -> do
@@ -190,7 +190,13 @@ getStrTyLitVal = \case
   Ghc.LitTy (Ghc.StrTyLit fs) -> Just fs
   _ -> Nothing
 
-getRecordFields :: Ghc.Type -> Maybe (Ghc.DataCon, [(Ghc.FastString, (Ghc.Type, Ghc.Name))])
+data RecordParts = RecordParts
+  { recordCon :: Ghc.DataCon
+  , recordTyArgs :: [Ghc.Type]
+  , recordFields :: [(Ghc.FastString, (Ghc.Type, Ghc.Name))]
+  }
+
+getRecordFields :: Ghc.Type -> Maybe RecordParts
 getRecordFields = \case
   Ghc.TyConApp tyCon args
     | Ghc.isAlgTyCon tyCon
@@ -202,7 +208,11 @@ getRecordFields = \case
       guard . not $ null fieldTys
       guard $ length fieldTys == length fieldLabels
       -- add a guard for equality of rep arity and source arity?
-      Just (dataCon, zip fieldLabels $ zip fieldTys fieldSelectors)
+      Just RecordParts
+        { recordCon = dataCon
+        , recordTyArgs = args
+        , recordFields = zip fieldLabels $ zip fieldTys fieldSelectors
+        }
   _ -> Nothing
 
 data LabelMatchResult

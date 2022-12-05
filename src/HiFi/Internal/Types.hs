@@ -110,15 +110,15 @@ class Instantiate rec f tuple where
 type FieldTypeCheck :: Symbol -> (Type -> Type) -> Type -> Type -> Constraint
 class FieldTypeCheck fieldName f recordTy userTy where
 
--- This equality constraint helps resolve ambiguous terms such as literals and Nothing
-instance a ~ b => FieldTypeCheck fieldName f a (f b)
+-- This equality constraint helps resolve ambiguous terms such as literals and Nothing.
+instance (a ~ b, f ~ g) => FieldTypeCheck fieldName f a (g b)
 
 instance {-# INCOHERENT #-}
-  TypeError
-       (Text "Expected '" :<>: ShowType (f a)
-   :<>: Text "', got '" :<>: ShowType b
-   :<>: Text "' for field '" :<>: Text fieldName :<>: Text "'")
-  => FieldTypeCheck fieldName f a b
+ TypeError
+      (Text "Expected '" :<>: ShowType (f a)
+  :<>: Text "', got '" :<>: ShowType b
+  :<>: Text "' for field '" :<>: Text fieldName :<>: Text "'")
+ => FieldTypeCheck fieldName f a b
 
 --------------------------------------------------------------------------------
 -- Utils

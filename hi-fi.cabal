@@ -40,14 +40,12 @@ test-suite hi-fi-test
     type:             exitcode-stdio-1.0
     hs-source-dirs:   test
     main-is:          Main.hs
+    ghc-options: -fplugin HiFi
+                 -Wno-orphans
     build-depends:
         base ^>=4.17.0.0,
-        hi-fi
-
-executable test
-  main-is: Main.hs
-  hs-source-dirs: exe
-  build-depends: base, hi-fi
-  ghc-options: -fplugin HiFi
-  default-language: GHC2021
-  default-extensions: OverloadedRecordDot
+        hi-fi,
+        tasty,
+        tasty-hunit,
+        tasty-quickcheck,
+        quickcheck-properties
