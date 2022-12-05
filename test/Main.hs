@@ -3,7 +3,6 @@
 {-# LANGUAGE OverloadedRecordDot #-}
 module Main (main) where
 
-import           Data.Functor.Compose
 import           Data.Functor.Identity
 import           Data.Monoid
 import           Data.String
@@ -27,6 +26,7 @@ tests = testGroup "tests"
     [ testCase "basic" testInstantiation
     , testCase "literals" testLiterals
     , testCase "parameterized" testParameterized
+    , testCase "type applications" testTypeApplications
     ]
   , testCase "effect mapping" testEffectMap
   , testCase "zipping" testZipping
@@ -113,6 +113,18 @@ testParameterized = do
                 }
   [r] @?= recSequence hkd
 
+testTypeApplications :: Assertion
+testTypeApplications = do
+  let hkd1 = (mkHKD @(Test3 Bool (Maybe ())))
+              { t3a = [True]
+              , t3b = [[Just ()]]
+              }
+      hkd2 = (mkHKD @(Test3 Bool (Maybe ())) @[])
+              { t3a = [True]
+              , t3b = [[Just ()]]
+              }
+  hkd1 @?= hkd2
+
 testEffectMap :: Assertion
 testEffectMap = do
   let hkd = mapEffect (Just . runIdentity) $ fromRecord testInput1
@@ -174,10 +186,10 @@ data Test2 = Test2
   } deriving (Eq, Show)
 
 instance Arbitrary (HKD Test2 Identity) where
-  arbitrary = recSequenceShallow mkHKD
-    { t2a = Compose (Identity <$> arbitrary)
-    , t2b = Compose (Identity <$> arbitrary)
-    , t2c = Compose (Identity <$> arbitrary)
+  arbitrary = fromRecord <$> recSequence mkHKD
+    { t2a = arbitrary
+    , t2b = arbitrary
+    , t2c = arbitrary
     }
 
 data Test3 a b = Test3

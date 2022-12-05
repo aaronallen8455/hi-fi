@@ -11,6 +11,8 @@ module HiFi.Internal.Types
   , Instantiate(..)
   , ToRecord(..)
   , FoldFields(..)
+  , MissingField
+  , UnknownField
   , indexArray
   , arrayFromList
   ) where
@@ -108,17 +110,31 @@ class Instantiate rec f tuple where
   instantiate :: tuple -> HKD rec f
 
 type FieldTypeCheck :: Symbol -> (Type -> Type) -> Type -> Type -> Constraint
-class FieldTypeCheck fieldName f recordTy userTy where
+class FieldTypeCheck fieldName f recordTy userTy
 
 -- This equality constraint helps resolve ambiguous terms such as literals and Nothing.
 instance (a ~ b, f ~ g) => FieldTypeCheck fieldName f a (g b)
 
 instance {-# INCOHERENT #-}
- TypeError
-      (Text "Expected '" :<>: ShowType (f a)
-  :<>: Text "', got '" :<>: ShowType b
-  :<>: Text "' for field '" :<>: Text fieldName :<>: Text "'")
- => FieldTypeCheck fieldName f a b
+  TypeError
+       (Text "Expected '" :<>: ShowType (f a)
+   :<>: Text "', got '" :<>: ShowType b
+   :<>: Text "' for field '" :<>: Text fieldName :<>: Text "'")
+  => FieldTypeCheck fieldName f a b
+
+type MissingField :: Symbol -> Type -> Constraint
+class MissingField fieldName rec
+instance
+  TypeError (Text "Missing field '" :<>: Text fieldName
+        :<>: Text "' of '" :<>: ShowType rec :<>: Text "'")
+  => MissingField fieldName rec
+
+type UnknownField :: Symbol -> Type -> Constraint
+class UnknownField fieldName rec
+instance
+  TypeError (Text "Unknown field '" :<>: Text fieldName
+        :<>: Text "' for '" :<>: ShowType rec :<>: Text "'")
+  => UnknownField fieldName rec
 
 --------------------------------------------------------------------------------
 -- Utils

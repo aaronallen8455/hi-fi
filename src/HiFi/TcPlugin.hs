@@ -41,6 +41,8 @@ data PluginInputs =
     , hasFieldClass       :: !Ghc.Class
     , knownSymbolClass    :: !Ghc.Class
     , hkdTyCon            :: !Ghc.TyCon
+    , missingFieldClass   :: !Ghc.Class
+    , unknownFieldClass   :: !Ghc.Class
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -70,6 +72,8 @@ lookupInputs = do
   hasFieldClass <- Ghc.tcLookupClass Ghc.hasFieldClassName
   knownSymbolClass <- Ghc.tcLookupClass Ghc.knownSymbolClassName
   hkdTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HKD")
+  missingFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "MissingField")
+  unknownFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "UnknownField")
   pure MkPluginInputs{..}
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
@@ -140,25 +144,26 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
 
          | clsName == instantiateName
-         , [ fmap recordFields . getRecordFields -> Just fields
+         , [ recTy
            , effectCon
            , tupleTy
-           ] <- cc_tyargs -> do
+           ] <- cc_tyargs
+         , Just fields <- recordFields <$> getRecordFields recTy -> do
              let fieldNames = fst <$> fields
              (tuplePairs, instantiateExpr)
                <- gatherTupleFieldsAndBuildExpr inp fieldNames tupleTy
-             let recordFieldMap = Ghc.listToUFM $ (fmap . fmap) fst fields
-             mNewWanteds <-
+             let recordFieldMap = Ghc.listToUFM
+                                $ (\(label, t) -> (label, (label, fst t)))
+                              <$> fields
+             newWanteds <-
                mkFieldTypeCheckWanteds
                  inp
                  (Ghc.ctLoc ct)
+                 recTy
                  recordFieldMap
                  tuplePairs
                  effectCon
-             pure $ case mNewWanteds of
-               Nothing -> Nothing
-               Just newWanteds ->
-                 Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
+             pure $ Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
 
          | otherwise -> pure Nothing
     _ -> pure Nothing
@@ -217,8 +222,8 @@ getRecordFields = \case
 
 data LabelMatchResult
   = Match Ghc.FastString Ghc.Type Ghc.Type
-  | Missing
-  | Extra
+  | Missing Ghc.FastString
+  | Extra Ghc.FastString
 
 -- Would be bad to generate selectors for each field. Why not have an expr that
 -- cases on the tuple, puts the vars in the correct order, and constructs the
@@ -228,27 +233,37 @@ data LabelMatchResult
 mkFieldTypeCheckWanteds
   :: PluginInputs
   -> Ghc.CtLoc
-  -> Ghc.UniqFM Ghc.FastString Ghc.Type
+  -> Ghc.Type
+  -> Ghc.UniqFM Ghc.FastString (Ghc.FastString, Ghc.Type)
   -> [(Ghc.FastString, Ghc.Type)]
   -> Ghc.Type -- effect constructor
-  -> Ghc.TcPluginM (Maybe [Ghc.Ct])
-mkFieldTypeCheckWanteds inp ctLoc recordFieldMap tuplePairs effectCon = do
+  -> Ghc.TcPluginM [Ghc.Ct]
+mkFieldTypeCheckWanteds inp ctLoc recTy recordFieldMap tuplePairs effectCon = do
   let matchResults = getFieldMatchResults recordFieldMap tuplePairs
   -- TODO generate error messages from missing or extra fields instead of just failing
   let go = \case
-        Match labelFs recordTy tupleTy ->
-          Just $ do
-            let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
-                classArgs = [ fieldNameTy
-                            , effectCon
-                            , recordTy
-                            , tupleTy
-                            ]
-            makeWantedCt ctLoc (fieldTypeCheckClass inp) classArgs
+        Match labelFs recFieldTy tupleTy -> do
+          let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
+              classArgs = [ fieldNameTy
+                          , effectCon
+                          , recFieldTy
+                          , tupleTy
+                          ]
+          makeWantedCt ctLoc (fieldTypeCheckClass inp) classArgs
 
-        Missing -> Nothing
-        Extra -> Nothing
-  traverse sequence . traverse go $ Ghc.nonDetEltsUFM matchResults
+        Missing labelFs -> do
+          let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
+              classArgs = [ fieldNameTy
+                          , recTy
+                          ]
+          makeWantedCt ctLoc (missingFieldClass inp) classArgs
+        Extra labelFs -> do
+          let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
+              classArgs = [ fieldNameTy
+                          , recTy
+                          ]
+          makeWantedCt ctLoc (unknownFieldClass inp) classArgs
+  traverse go $ Ghc.nonDetEltsUFM matchResults
 
 makeWantedCt :: Ghc.CtLoc -> Ghc.Class -> [Ghc.Type] -> Ghc.TcPluginM Ghc.Ct
 makeWantedCt ctLoc clss classArgs = do
@@ -263,15 +278,15 @@ makeWantedCt ctLoc clss classArgs = do
     }
 
 getFieldMatchResults
-  :: Ghc.UniqFM Ghc.FastString Ghc.Type
+  :: Ghc.UniqFM Ghc.FastString (Ghc.FastString, Ghc.Type)
   -> [(Ghc.FastString, Ghc.Type)]
   -> Ghc.UniqFM Ghc.FastString LabelMatchResult
 getFieldMatchResults recordFieldMap tuplePairs = do
   let tupleFieldMap = Ghc.listToUFM $ zip (fst <$> tuplePairs) tuplePairs
 
-      inBoth x (label, y) = Just $ Match label x y
-      onlyInRecord = (<$) Missing
-      onlyInTuple = (<$) Extra
+      inBoth (_, x) (label, y) = Just $ Match label x y
+      onlyInRecord = fmap (\(label, _) -> Missing label)
+      onlyInTuple = fmap (\(label, _) -> Extra label)
 
    in Ghc.mergeUFM
         inBoth

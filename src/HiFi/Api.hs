@@ -35,9 +35,15 @@ recSequenceShallow :: forall f g rec. Applicative f
 recSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse getCompose arr
 
 recSequence :: forall f rec. (Applicative f, ToRecord rec) => HKD rec f -> f rec
-recSequence = fmap toRecord . recSequenceShallow @f @Identity . mapEffect (Compose . fmap Identity)
+recSequence = fmap toRecord
+            . recSequenceShallow @f @Identity
+            . mapEffect (Compose . fmap Identity)
 
-recZipWith :: (forall a. f a -> g a -> h a) -> HKD rec f -> HKD rec g -> HKD rec h
+recZipWith
+  :: (forall a. f a -> g a -> h a)
+  -> HKD rec f
+  -> HKD rec g
+  -> HKD rec h
 recZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ do
   i <- [0 .. A.sizeofArray a]
   [ f (A.indexArray a i) (A.indexArray b i) ]
