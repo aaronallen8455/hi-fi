@@ -7,6 +7,7 @@ module HiFi.TcPlugin
   ) where
 
 import           Control.Monad
+import           Control.Monad.Trans.State.Strict (StateT(..))
 import           Data.Either (partitionEithers)
 import           Data.Functor ((<&>))
 import qualified Data.List as List
@@ -308,57 +309,61 @@ gatherTupleFieldsAndBuildExpr MkPluginInputs{..} fieldNames tupleTy = do
     (pairs, expr) <- go [] tupleBind tupleTy
     pure (pairs, Ghc.mkCoreLams [tupleBind] expr)
   where
+    getFieldPairFromTy ty = StateT $ \exprBuilder -> case ty of
+      Ghc.TyConApp _ [fieldNameTy@(Ghc.TyConApp fnTyCon fieldNameLit), fieldTy]
+        | Ghc.getName fnTyCon == Ghc.getName fieldNameTyCon
+        , [Ghc.LitTy (Ghc.StrTyLit fs)] <- fieldNameLit -> do
+          fieldVarName
+            <- Ghc.unsafeTcPluginTcM
+             $ Ghc.newName (Ghc.mkOccName Ghc.varName "field")
+          let fieldVarId = Ghc.mkLocalIdOrCoVar fieldVarName Ghc.Many fieldTy
+
+          fieldPairName
+            <- Ghc.unsafeTcPluginTcM
+             $ Ghc.newName (Ghc.mkOccName Ghc.varName "fieldPair")
+          let fieldPairId = Ghc.mkLocalIdOrCoVar fieldPairName Ghc.Many ty
+              mkPairCase =
+                Ghc.mkSingleAltCase
+                  (Ghc.Var fieldPairId)
+                  (Ghc.mkWildValBinder Ghc.Many ty)
+                  (Ghc.DataAlt $ Ghc.tupleDataCon Ghc.Boxed 2)
+                  [Ghc.mkWildValBinder Ghc.Many fieldNameTy, fieldVarId]
+
+          pure ( (fieldPairId, (fs, (fieldVarId, fieldTy)))
+               , mkPairCase . exprBuilder
+               )
+
+      _ -> fail "unexpected tuple structure in gatherTupleFieldsAndBuildExpr"
+
     go ids tupleBind ty = case ty of
-      Ghc.TyConApp tyCon [arg1Ty, arg2Ty]
+      Ghc.TyConApp tyCon (restTy : fieldTys)
         | Ghc.isAlgTyCon tyCon
-        , Ghc.TupleTyCon{} <- Ghc.algTyConRhs tyCon ->
-            case arg1Ty of
-              Ghc.TyConApp _ [fieldNameTy@(Ghc.TyConApp fnTyCon fieldNameLit), fieldTy]
-                | Ghc.getName fnTyCon == Ghc.getName fieldNameTyCon
-                , [Ghc.LitTy (Ghc.StrTyLit fs)] <- fieldNameLit -> do
+        , Ghc.TupleTyCon{} <- Ghc.algTyConRhs tyCon -> do
+            (fields, exprBuilder)
+              <- (`runStateT` id)
+               $ traverse getFieldPairFromTy fieldTys
 
-                arg1VarName
-                  <- Ghc.unsafeTcPluginTcM
-                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "arg1")
-                let arg1VarId = Ghc.mkLocalIdOrCoVar arg1VarName Ghc.Many arg1Ty
+            restVarName
+              <- Ghc.unsafeTcPluginTcM
+               $ Ghc.newName (Ghc.mkOccName Ghc.varName "rest")
 
-                arg2VarName
-                  <- Ghc.unsafeTcPluginTcM
-                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "arg2")
-                -- TODO This results in core size being n^2 in the number of fields.
-                -- Could be improved by increasing the tuple size. Why not go
-                -- for the max size?
-                let arg2VarId = Ghc.mkLocalIdOrCoVar arg2VarName Ghc.Many arg2Ty
+            let restVarId = Ghc.mkLocalIdOrCoVar restVarName Ghc.Many restTy
 
-                fieldVarName
-                  <- Ghc.unsafeTcPluginTcM
-                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "field")
-                let fieldVarId = Ghc.mkLocalIdOrCoVar fieldVarName Ghc.Many fieldTy
+            (resultIds, nextExpr)
+              <- go (map snd fields ++ ids)
+                    restVarId
+                    restTy
 
-                (resultIds, nextExpr)
-                  <- go ((fs, (fieldVarId, fieldTy)) : ids)
-                        arg2VarId
-                        arg2Ty
+            let expr = exprBuilder nextExpr
+                tupleCase =
+                  Ghc.mkSingleAltCase
+                    (Ghc.Var tupleBind)
+                    (Ghc.mkWildValBinder Ghc.Many ty)
+                    (Ghc.DataAlt $ Ghc.tupleDataCon Ghc.Boxed (length fieldTys + 1))
+                    (restVarId : (fst <$> fields))
+                    expr
 
-                let pairCase =
-                      Ghc.mkSingleAltCase
-                        (Ghc.Var arg1VarId)
-                        (Ghc.mkWildValBinder Ghc.Many arg1Ty)
-                        (Ghc.DataAlt $ Ghc.tupleDataCon Ghc.Boxed 2)
-                        [Ghc.mkWildValBinder Ghc.Many fieldNameTy, fieldVarId]
-                        nextExpr
-
-                    tupleCase =
-                      Ghc.mkSingleAltCase
-                        (Ghc.Var tupleBind)
-                        (Ghc.mkWildValBinder Ghc.Many ty)
-                        (Ghc.DataAlt $ Ghc.tupleDataCon Ghc.Boxed 2)
-                        [arg1VarId, arg2VarId]
-                        pairCase
-
-                pure (resultIds, tupleCase)
-
-              _ -> fail "unexpected tuple structure in gatherTupleFieldsAndBuildExpr"
+            pure (resultIds, tupleCase)
 
       -- the tuple nesting ends in a unit
       Ghc.TyConApp tyCon []

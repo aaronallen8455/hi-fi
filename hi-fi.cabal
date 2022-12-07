@@ -28,7 +28,8 @@ library
     build-depends:    base ^>=4.17.0.0,
                       ghc >= 9.2.0,
                       primitive,
-                      syb
+                      syb,
+                      transformers
     hs-source-dirs:   src
     default-language: GHC2021
 

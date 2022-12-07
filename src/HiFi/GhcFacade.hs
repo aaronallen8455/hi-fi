@@ -30,3 +30,4 @@ import           GHC.Core.InstEnv as Ghc
 import           GHC.Tc.Instance.Class as Ghc
 import           GHC.Tc.Solver.Monad as Ghc (runTcS)
 import           GHC.Tc.Solver.Interact as Ghc (solveSimpleWanteds)
+import           GHC.Settings.Constants as Ghc

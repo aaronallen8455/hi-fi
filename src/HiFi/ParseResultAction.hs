@@ -54,17 +54,16 @@ mkTupleFromFields
   :: [(Ghc.FastString, Ghc.HsExpr Ghc.GhcPs)]
   -> Ghc.LHsExpr Ghc.GhcPs
 mkTupleFromFields [] = unitHsExpr
-mkTupleFromFields ((fieldName, expr) : rest) =
-  Ghc.mkLHsTupleExpr
-    [ pairTuple, mkTupleFromFields rest ]
-    mempty
+mkTupleFromFields (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)) =
+    Ghc.mkLHsTupleExpr
+      (mkTupleFromFields rest : map mkPairTuple fields)
+      mempty
   where
-    pairTuple =
+    mkPairTuple (fieldName, expr) =
       Ghc.mkLHsTupleExpr
-        [Ghc.noLocA fieldNameExpr, Ghc.noLocA expr]
+        [Ghc.noLocA $ mkFieldNameExpr fieldName, Ghc.noLocA expr]
         mempty
-    fieldNameExpr :: Ghc.HsExpr Ghc.GhcPs
-    fieldNameExpr =
+    mkFieldNameExpr fieldName =
       Ghc.HsAppType
         Ghc.noSrcSpan
         (Ghc.noLocA $
