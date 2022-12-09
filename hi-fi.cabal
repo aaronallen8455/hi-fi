@@ -29,7 +29,8 @@ library
                       ghc >= 9.2.0,
                       primitive,
                       syb,
-                      transformers
+                      transformers,
+                      bytestring
     hs-source-dirs:   src
     default-language: GHC2021
 

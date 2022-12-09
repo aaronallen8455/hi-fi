@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE LambdaCase #-}
@@ -5,21 +6,35 @@ module HiFi.ParseResultAction
   ( parseResultAction
   ) where
 
+import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Internal as BSI
 import qualified Data.Generics as Syb
 
 import qualified HiFi.GhcFacade as Ghc
 
 parseResultAction :: Ghc.ModSummary -> Ghc.ParsedResult -> Ghc.Hsc Ghc.ParsedResult
-parseResultAction _modSummary parsedResult = do
-  -- TODO check if source code actually contains "mkHKD" before doing a traversal
-  let parsedModule = Ghc.parsedResultModule parsedResult
+parseResultAction modSummary parsedResult = do
+  let mSrcCodeBuffer = Ghc.ms_hspp_buf modSummary
+      parsedModule = Ghc.parsedResultModule parsedResult
       applyTransform mo =
         mo { Ghc.hsmodDecls = Syb.everywhere (Syb.mkT transformMkHKD)
                             $ Ghc.hsmodDecls mo
            }
       newModule = applyTransform <$> Ghc.hpm_module parsedModule
-  pure parsedResult
-    { Ghc.parsedResultModule = parsedModule { Ghc.hpm_module = newModule } }
+
+  -- To prevent doing a traversal of the AST in vain, check if the source code
+  -- contains the target string, otherwise no-op
+  case containsMatch "mkHKD" <$> mSrcCodeBuffer of
+    Just False -> pure parsedResult
+    _ -> pure parsedResult
+        { Ghc.parsedResultModule = parsedModule { Ghc.hpm_module = newModule } }
+
+containsMatch :: BS.ByteString -> Ghc.StringBuffer -> Bool
+containsMatch needle buf =
+  not . BS.null . snd . BS.breakSubstring needle $ bufToByteString buf
+
+bufToByteString :: Ghc.StringBuffer -> BS.ByteString
+bufToByteString (Ghc.StringBuffer buf len cur) = BSI.PS buf cur len
 
 transformMkHKD :: Ghc.HsExpr Ghc.GhcPs -> Ghc.HsExpr Ghc.GhcPs
 transformMkHKD = \case
