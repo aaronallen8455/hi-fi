@@ -3,6 +3,7 @@ module HiFi.Api
   ( mapEffect
   , recSequenceShallow
   , recSequence
+  , recTraverse
   , recZipWith
   , toRecord
   , fromRecord
@@ -38,6 +39,13 @@ recSequence :: forall f rec. (Applicative f, ToRecord rec) => HKD rec f -> f rec
 recSequence = fmap toRecord
             . recSequenceShallow @f @Identity
             . mapEffect (Compose . fmap Identity)
+
+recTraverse
+  :: Applicative t
+  => (forall a. f a -> t (g a))
+  -> HKD rec f
+  -> t (HKD rec g)
+recTraverse f = recSequenceShallow . mapEffect (coerce . f)
 
 recZipWith
   :: (forall a. f a -> g a -> h a)

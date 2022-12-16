@@ -208,6 +208,10 @@ getRecordFields = \case
     | Ghc.isAlgTyCon tyCon
     , Ghc.DataTyCon{..} <- Ghc.algTyConRhs tyCon
     , [dataCon] <- data_cons -> do
+      -- Don't allow existential ty vars
+      guard $ length (Ghc.dataConUnivAndExTyCoVars dataCon) == length args
+      -- Don't allow contexts
+      guard . null $ Ghc.dataConTheta dataCon ++ Ghc.dataConStupidTheta dataCon
       let fieldTys = Ghc.scaledThing <$> Ghc.dataConInstOrigArgTys dataCon args
           fieldLabels = Ghc.flLabel <$> Ghc.dataConFieldLabels dataCon
           fieldSelectors = Ghc.flSelector <$> Ghc.dataConFieldLabels dataCon
