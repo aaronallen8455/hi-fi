@@ -19,3 +19,5 @@ recordUpdate =
         , baz = Just "new"
         }
 ```
+
+- Does not work with `NamedFieldPuns` or `RecordWildCards`

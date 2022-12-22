@@ -57,7 +57,9 @@ transformMkHKD = \case
 getFieldPair
   :: Ghc.HsRecUpdField Ghc.GhcPs
   -> (Ghc.FastString, Ghc.HsExpr Ghc.GhcPs)
-getFieldPair Ghc.HsFieldBind {..} = (getFieldName $ Ghc.unLoc hfbLHS, Ghc.unLoc hfbRHS)
+getFieldPair Ghc.HsFieldBind {..} =
+  ( getFieldName $ Ghc.unLoc hfbLHS
+  , Ghc.unLoc hfbRHS)
 
 extractName :: Ghc.RdrName -> Ghc.FastString
 extractName = Ghc.occNameFS . Ghc.rdrNameOcc
