@@ -87,10 +87,6 @@ class IndexOfField name rec where
 class FieldGetters rec where
   fieldGetters :: [rec -> Exts.Any]
 
--- Could build a core expr that applies the dataCon to each element from the
--- array. Will have to lookup the `indexArray` Id to do this.
--- Might be easier to construct an rn expr and then typecheck and desugar it.
--- Core might be easier because won't have to deal with coercions
 class ToRecord rec where
   toRecord' :: RecArray -> rec
 

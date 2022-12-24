@@ -4,6 +4,7 @@
 module Main (main, Test4(..)) where
 
 import           Data.Foldable
+import           Data.Functor.Compose
 import           Data.Functor.Identity
 import           Data.Monoid
 import           Data.String
@@ -36,6 +37,8 @@ tests = testGroup "tests"
   , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD Test2 Identity)))
   , testProperty "Eq" testEq
   , testProperty "Ord" testOrd
+  , testCase "distribute" testDistribute
+  , testCase "hkd distribute" testHkdDistribute
   ]
 
 tripRecord :: Property
@@ -419,6 +422,48 @@ testOrd =
   forAll (arbitrary @Test1) $ \x ->
     forAll arbitrary $ \y ->
       compare x y === compare (fromRecord x) (fromRecord y)
+
+testDistribute :: Assertion
+testDistribute = do
+  let recs = [ testInput1
+             , Test1 { t1a = False
+                     , t1b = 99
+                     , t1c = 1.1
+                     , t1d = 9.9
+                     , t1e = UnicodeString "..."
+                     }
+             ]
+      hkd = mkHKD { t1a = [True, False]
+                  , t1b = [1, 99]
+                  , t1c = [3.4, 1.1]
+                  , t1d = [4.5, 9.9]
+                  , t1e = [UnicodeString "abc", UnicodeString "..."]
+                  }
+  hkd @?= recDistribute recs
+
+testHkdDistribute :: Assertion
+testHkdDistribute = do
+  let hkds = [ mkHKD { t1a = Just False
+                     , t1b = Just 99
+                     , t1c = Just 1.1
+                     , t1d = Just 9.9
+                     , t1e = Nothing
+                     }
+             , mkHKD { t1a = Just True
+                     , t1b = Just 20
+                     , t1c = Nothing
+                     , t1d = Nothing
+                     , t1e = Nothing
+                     }
+             ]
+      hkd = (mkHKD @Test1)
+              { t1a = Compose [Just False, Just True]
+              , t1b = Compose [Just 99, Just 20]
+              , t1c = Compose [Just 1.1, Nothing]
+              , t1d = Compose [Just 9.9, Nothing]
+              , t1e = Compose [Nothing, Nothing]
+              }
+  hkd @?= hkdDistribute hkds
 
 data Test1 = Test1
   { t1a :: Bool

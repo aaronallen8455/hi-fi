@@ -230,11 +230,6 @@ data LabelMatchResult
   | Missing Ghc.FastString
   | Extra Ghc.FastString
 
--- Would be bad to generate selectors for each field. Why not have an expr that
--- cases on the tuple, puts the vars in the correct order, and constructs the
--- array from that?
-
--- could use this to only return the Ct
 mkFieldTypeCheckWanteds
   :: PluginInputs
   -> Ghc.CtLoc
