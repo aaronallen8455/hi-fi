@@ -88,7 +88,7 @@ fromRecord :: forall rec. FieldGetters rec => rec -> HKD rec Identity
 fromRecord rec =
   UnsafeMkHKD
     . A.arrayFromList
-    . fmap (Identity . ($ rec))
+    . fmap (coerce . ($ rec))
     $ fieldGetters @rec
 
 mkHKD :: forall rec f tuple. Instantiate rec f tuple => tuple -> HKD rec f

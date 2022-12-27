@@ -1,0 +1,6 @@
+packages: .
+
+source-repository-package
+    type: git
+    location: https://github.com/aaronallen8455/named.git
+    tag: 10eb608ca3f694b281332a7c1822763ba4e71c58
