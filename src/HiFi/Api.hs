@@ -37,12 +37,12 @@ mapEffect f (UnsafeMkHKD arr) = UnsafeMkHKD $ f <$> arr
 
 recSequenceShallow :: forall f g rec. Applicative f
                    => HKD rec (Compose f g) -> f (HKD rec g)
-recSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse getCompose arr
+recSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse coerce arr
 
 recSequence :: forall f rec. (Applicative f, ToRecord rec) => HKD rec f -> f rec
 recSequence = fmap toRecord
             . recSequenceShallow @f @Identity
-            . mapEffect (Compose . fmap Identity)
+            . mapEffect (coerce . fmap Identity)
 
 recDistribute :: forall rec f. (FieldGetters rec, Functor f)
               => f rec -> HKD rec f

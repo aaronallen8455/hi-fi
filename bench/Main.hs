@@ -10,14 +10,20 @@ import           HiFi
 
 main :: IO ()
 main = defaultMain
-  [ bench "fromRecord (hi-fi)" $ whnf fromRecordHiFi testRec
-  , bench "fromRecord (higgledy)" $ whnf fromRecordHiggledy testRec
-  , bench "toRecord (hi-fi)" $ whnf toRecordHiFi (fromRecord testRec)
-  , bench "toRecord (higgledy)" $ whnf toRecordHiggledy (Hig.deconstruct testRec)
-  , bench "instantiate (hi-fi)" $ whnf instantiateHiFi 1
-  , bench "instantiate (higgledy)" $ whnf instantiateHiggledy 1
-  , bench "getter (hi-fi)" $ whnf (\x -> x.t200) (fromRecord testRec)
-  , bench "getter (higgledy)" $ whnf (\x -> x ^. Hig.field @"t200") (fromRecordHiggledy testRec)
+  [ bgroup "large record"
+    [ bench "fromRecord (hi-fi)" $ whnf fromRecordHiFi testRec
+    , bench "fromRecord (higgledy)" $ whnf fromRecordHiggledy testRec
+    , bench "toRecord (hi-fi)" $ whnf toRecordHiFi (fromRecord testRec)
+    , bench "toRecord (higgledy)" $ whnf toRecordHiggledy (Hig.deconstruct testRec)
+    , bench "instantiate (hi-fi)" $ whnf instantiateHiFi 1
+    , bench "instantiate (higgledy)" $ whnf instantiateHiggledy 1
+    , bench "getter (hi-fi)" $ whnf (\x -> x.t200) (fromRecord testRec)
+    , bench "getter (higgledy)" $ whnf (\x -> x ^. Hig.field @"t200") (fromRecordHiggledy testRec)
+    , bench "setter (hi-fi)" $ whnf (setField @"t200" 5) (fromRecord testRec)
+    , bench "setter (higgledy)" $ whnf (Hig.field @"t200" .~ 5) (fromRecordHiggledy testRec)
+    , bench "map effect (hi-fi)" $ whnf (mapEffect (Just . runIdentity)) (fromRecord testRec)
+    , bench "map effect (higgledy)" $ whnf (Hig.bmap (Just . runIdentity)) (fromRecordHiggledy testRec)
+    ]
   ]
 
 fromRecordHiFi :: Test -> HKD Test Identity
@@ -33,7 +39,7 @@ toRecordHiggledy :: Hig.HKD Test Identity -> Test
 toRecordHiggledy = runIdentity . Hig.construct
 
 instantiateHiFi :: Int -> HKD Test Identity
-instantiateHiFi x = mkHKD
+instantiateHiFi !x = mkHKD
   { t1 = Identity x
   , t2 = Identity x
   , t3 = Identity x
@@ -437,7 +443,7 @@ instantiateHiFi x = mkHKD
   }
 
 instantiateHiggledy :: Int -> Hig.HKD Test Identity
-instantiateHiggledy x =
+instantiateHiggledy !x =
   Hig.build @Test
     (Identity x)
     (Identity x)
