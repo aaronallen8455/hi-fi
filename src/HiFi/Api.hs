@@ -28,6 +28,8 @@ import           Unsafe.Coerce (unsafeCoerce)
 
 import           HiFi.Internal.Types (FieldGetters(..), HKD(..), IndexOfField(..), Instantiate(..), ToRecord(..))
 
+import           Debug.Trace
+
 --------------------------------------------------------------------------------
 -- API
 --------------------------------------------------------------------------------
@@ -79,7 +81,7 @@ recZipWith
   -> HKD rec g
   -> HKD rec h
 recZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ do
-  i <- [0 .. A.sizeofArray a]
+  i <- [0 .. A.sizeofArray a - 1]
   [ f (A.indexArray a i) (A.indexArray b i) ]
 
 toRecord :: ToRecord rec => HKD rec Identity -> rec
@@ -89,10 +91,15 @@ fromRecord :: forall rec. FieldGetters rec => rec -> HKD rec Identity
 fromRecord rec =
   let getters = fieldGetters @rec
    in UnsafeMkHKD $ A.createArray (length getters) undefined $ \arr -> do
-    let go !i x = do
-          A.writeArray arr i (coerce $ x rec)
-          pure (i + 1)
-    foldM_ go 0 getters
+    let go !ix (x:xs) = do
+          A.writeArray arr ix (coerce $ x rec)
+          go (ix + 1) xs
+        go _ [] = pure ()
+    go 0 getters
+--   UnsafeMkHKD
+--     . fmap (coerce . ($ rec))
+--     . A.arrayFromList
+--     $ fieldGetters @rec
 
 mkHKD :: forall rec f tuple. Instantiate rec f tuple => tuple -> HKD rec f
 mkHKD = instantiate @rec @f @tuple

@@ -5,7 +5,6 @@ module HiFi.Internal.Types
   ( HKD(..)
   , RecArray
   , FieldName(..)
-  , FieldType(..)
   , IndexOfField(..)
   , FieldGetters(..)
   , Instantiate(..)
@@ -31,8 +30,6 @@ newtype HKD rec f =
 
 data FieldName (symbol :: Symbol) = MkFieldName
 
-data FieldType (a :: Type) = MkFieldType
-
 type RecArray = A.Array Exts.Any
 
 --------------------------------------------------------------------------------
@@ -41,7 +38,8 @@ type RecArray = A.Array Exts.Any
 
 instance FoldFields Semigroup rec f => Semigroup (HKD rec f) where
   a <> b =
-    let go _ _ getter =
+    let go :: forall a. Semigroup (f a) => String -> (HKD rec f -> f a) -> f Exts.Any
+        go _ getter =
           unsafeCoerce $ getter a <> getter b
         -- TODO would be more efficient to not construct the intermediate list
         fields =
@@ -50,25 +48,28 @@ instance FoldFields Semigroup rec f => Semigroup (HKD rec f) where
 
 instance (FoldFields Semigroup rec f, FoldFields Monoid rec f) => Monoid (HKD rec f) where
   mempty =
-    let go _ (MkFieldType :: FieldType a) _ = unsafeCoerce $ mempty @(f a)
+    let go :: forall a. Monoid (f a) => String -> (HKD rec f -> f a) -> f Exts.Any
+        go _ _ = unsafeCoerce $ mempty @(f a)
         fields =
           foldFields @Monoid @rec @f go [] (:)
      in UnsafeMkHKD $ A.arrayFromList fields
 
 instance FoldFields Eq rec f => Eq (HKD rec f) where
   a == b =
-    let go _ _ getter = getter a == getter b
+    let go :: forall a. Eq (f a) => String -> (HKD rec f -> f a) -> Bool
+        go _ getter = getter a == getter b
      in foldFields @Eq @rec @f go True (&&)
 
 instance FoldFields Show rec f => Show (HKD rec f) where
   show rec =
-    let go fieldName _ getter =
+    let go fieldName getter =
           fieldName <> " = " <> show (getter rec)
      in "HKD {" <> List.intercalate ", " (foldFields @Show @rec @f go [] (:)) <> "}"
 
 instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
   compare a b =
-    let go _ _ getter = compare (getter a) (getter b)
+    let go :: forall a. Ord (f a) => String -> (HKD rec f -> f a) -> Ordering
+        go _ getter = compare (getter a) (getter b)
      in foldFields @Ord @rec @f go mempty (<>)
 
 instance (HasField (name :: Symbol) rec a, IndexOfField name rec)
@@ -95,7 +96,7 @@ type FoldFields :: (Type -> Constraint) -> Type -> (Type -> Type) -> Constraint
 class FoldFields c rec f where
   foldFields :: forall acc x.
                 (forall a.
-                  c (f a) => String -> FieldType a -> (HKD rec f -> f a) -> x
+                  c (f a) => String -> (HKD rec f -> f a) -> x
                 )
              -> acc
              -> (x -> acc -> acc)

@@ -16,6 +16,8 @@ import           Data.Traversable (for)
 
 import qualified HiFi.GhcFacade as Ghc
 
+import           Debug.Trace
+
 tcPlugin :: Ghc.TcPlugin
 tcPlugin = Ghc.TcPlugin
   { Ghc.tcPluginInit = lookupInputs
@@ -35,8 +37,6 @@ data PluginInputs =
     , recArrayTyCon       :: !Ghc.TyCon
     , fieldNameTyCon      :: !Ghc.TyCon
     , mkFieldNameDataCon  :: !Ghc.DataCon
-    , fieldTypeTyCon      :: !Ghc.TyCon
-    , mkFieldTypeDataCon  :: !Ghc.DataCon
     , arrayFromListId     :: !Ghc.Id
     , fieldTypeCheckClass :: !Ghc.Class
     , hasFieldClass       :: !Ghc.Class
@@ -66,8 +66,6 @@ lookupInputs = do
   recArrayTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "RecArray")
   fieldNameTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldName")
   mkFieldNameDataCon <- Ghc.tcLookupDataCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkDataOcc "MkFieldName")
-  fieldTypeTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldType")
-  mkFieldTypeDataCon <- Ghc.tcLookupDataCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkDataOcc "MkFieldType")
   arrayFromListId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "arrayFromList")
   fieldTypeCheckClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldTypeCheck")
   hasFieldClass <- Ghc.tcLookupClass Ghc.hasFieldClassName
@@ -421,8 +419,6 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
                   ]
           tyBody = Ghc.stringTy
                  `Ghc.mkVisFunTyMany`
-                   Ghc.mkTyConApp fieldTypeTyCon [Ghc.mkTyVarTy fieldTyVar]
-                 `Ghc.mkVisFunTyMany`
                    ( hkdTy
                    `Ghc.mkVisFunTyMany`
                      Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]
@@ -450,7 +446,6 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
       mkFieldGenExpr (idx, (fieldName, fieldTy)) = do
         stringIds <- Ghc.getMkStringIds Ghc.tcLookupId
         let fieldNameExpr = Ghc.mkStringExprFSWith stringIds fieldName
-        let fieldTypeExpr = Ghc.mkCoreConApps mkFieldTypeDataCon [Ghc.Type fieldTy]
             getterExpr =
               Ghc.mkCoreLams [hkdBndr] $
                 Ghc.mkCoreApps (Ghc.Var indexArrayId)
@@ -468,12 +463,12 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
         let evVar = Ghc.ctEvEvId $ Ghc.ctEvidence predCt
         ePredDict <- buildEvExprFromMap ctLoc evVar evBindMap
 
+        traceM $ Ghc.showSDocUnsafe $ Ghc.ppr fieldNameExpr
         pure $ ePredDict <&> \predDict ->
           Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
             [ Ghc.Type fieldTy
             ] ++ [predDict] ++
             [ fieldNameExpr
-            , fieldTypeExpr
             , getterExpr
             ]
 

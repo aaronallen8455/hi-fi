@@ -2,7 +2,6 @@ module HiFi
   ( -- * Types
     HKD
   , FieldName(..)
-  , FieldType(..)
   -- * API
   , module Api
   -- * Plugin
@@ -13,7 +12,7 @@ import           HiFi.Api as Api
 import qualified HiFi.GhcFacade as Ghc
 import           HiFi.ParseResultAction (parseResultAction)
 import           HiFi.TcPlugin (tcPlugin)
-import           HiFi.Internal.Types (FieldName(..), FieldType(..), HKD)
+import           HiFi.Internal.Types (FieldName(..), HKD)
 
 plugin :: Ghc.Plugin
 plugin = Ghc.defaultPlugin

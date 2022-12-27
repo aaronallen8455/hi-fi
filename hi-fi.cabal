@@ -67,3 +67,11 @@ benchmark hi-fi-bench
     barbies,
     higgledy,
     generic-lens
+
+executable test
+  main-is: Main.hs
+  hs-source-dirs: exe
+  build-depends: base, hi-fi
+  ghc-options: -fplugin HiFi
+  default-language: GHC2021
+  default-extensions: OverloadedRecordDot

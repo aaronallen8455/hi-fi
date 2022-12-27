@@ -15,6 +15,8 @@ import           Test.QuickCheck.Property.Monoid
 
 import           HiFi
 
+import           Debug.Trace
+
 main :: IO ()
 main = defaultMain tests
 
@@ -49,11 +51,11 @@ tripRecord =
 testGetters :: Assertion
 testGetters = do
   let hkd = fromRecord testInput1
-  Identity testInput1.t1a @?= hkd.t1a
-  Identity testInput1.t1b @?= hkd.t1b
-  Identity testInput1.t1c @?= hkd.t1c
-  Identity testInput1.t1d @?= hkd.t1d
-  Identity testInput1.t1e @?= hkd.t1e
+  Identity testInput1.t1a @=? hkd.t1a
+  Identity testInput1.t1b @=? hkd.t1b
+  Identity testInput1.t1c @=? hkd.t1c
+  Identity testInput1.t1d @=? hkd.t1d
+  Identity testInput1.t1e @=? hkd.t1e
 
 testSetters :: Assertion
 testSetters = do
@@ -64,7 +66,7 @@ testSetters = do
           . setField @"t1e" (Identity (UnicodeString "dsa"))
           $ fromRecord testInput1
   Test1 False 2 5.1 (-9.1) (UnicodeString "dsa")
-    @?= toRecord hkd
+    @=? toRecord hkd
 
 testSequence :: Assertion
 testSequence = do
@@ -80,7 +82,7 @@ testSequence = do
                   , t1e = e
                   }
       app = Test1 <$> a <*> b <*> c <*> d <*> e
-  app @?= recSequence hkd
+  app @=? recSequence hkd
 
 testInstantiation :: Assertion
 testInstantiation = do
@@ -90,7 +92,7 @@ testInstantiation = do
                   , t1b = pure testInput1.t1b
                   , t1d = pure testInput1.t1d
                   }
-  Just testInput1 @?= recSequence hkd
+  Just testInput1 @=? recSequence hkd
 
 testLiterals :: Assertion
 testLiterals = do
@@ -106,7 +108,7 @@ testLiterals = do
                   , t1d = 5
                   , t1e = UnicodeString "hello"
                   }
-  rec @?= toRecord hkd
+  rec @=? toRecord hkd
 
 testParameterized :: Assertion
 testParameterized = do
@@ -116,7 +118,7 @@ testParameterized = do
       r = Test3 { t3a = True
                 , t3b = [Just ()]
                 }
-  [r] @?= recSequence hkd
+  [r] @=? recSequence hkd
 
 testTypeApplications :: Assertion
 testTypeApplications = do
@@ -128,7 +130,7 @@ testTypeApplications = do
               { t3a = [True]
               , t3b = [[Just ()]]
               }
-  hkd1 @?= hkd2
+  hkd1 @=? hkd2
 
 testLargeRecord :: Assertion
 testLargeRecord = do
@@ -392,7 +394,7 @@ testLargeRecord = do
 testEffectMap :: Assertion
 testEffectMap = do
   let hkd = mapEffect (Just . runIdentity) $ fromRecord testInput1
-  Just testInput1 @?= recSequence hkd
+  Just testInput1 @=? recSequence hkd
 
 testZipping :: Assertion
 testZipping = do
@@ -404,12 +406,12 @@ testZipping = do
                   }
       new = recZipWith (`maybe` Identity) (fromRecord testInput1) upd
       expected = testInput1 { t1a = False, t1d = 9.99, t1e = "cde" }
-  expected @?= toRecord new
+  expected @=? toRecord new
 
 testFill :: Assertion
 testFill = do
   let hkd = fill @Test1 []
-  [] @?= recSequence hkd
+  [] @=? recSequence hkd
 
 testEq :: Property
 testEq =
@@ -439,7 +441,7 @@ testDistribute = do
                   , t1d = [4.5, 9.9]
                   , t1e = [UnicodeString "abc", UnicodeString "..."]
                   }
-  hkd @?= recDistribute recs
+  hkd @=? recDistribute recs
 
 testHkdDistribute :: Assertion
 testHkdDistribute = do
@@ -463,7 +465,7 @@ testHkdDistribute = do
               , t1d = Compose [Just 9.9, Nothing]
               , t1e = Compose [Nothing, Nothing]
               }
-  hkd @?= hkdDistribute hkds
+  hkd @=? hkdDistribute hkds
 
 data Test1 = Test1
   { t1a :: Bool
