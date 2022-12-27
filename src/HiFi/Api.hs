@@ -16,6 +16,7 @@ module HiFi.Api
   , atField
   ) where
 
+import           Control.Monad (foldM_)
 import           Control.Monad.ST
 import           Data.Coerce (coerce)
 import           Data.Functor.Compose (Compose(..))
@@ -86,10 +87,12 @@ toRecord (UnsafeMkHKD arr) = toRecord' $ coerce arr
 
 fromRecord :: forall rec. FieldGetters rec => rec -> HKD rec Identity
 fromRecord rec =
-  UnsafeMkHKD
-    . A.arrayFromList
-    . fmap (coerce . ($ rec))
-    $ fieldGetters @rec
+  let getters = fieldGetters @rec
+   in UnsafeMkHKD $ A.createArray (length getters) undefined $ \arr -> do
+    let go !i x = do
+          A.writeArray arr i (coerce $ x rec)
+          pure (i + 1)
+    foldM_ go 0 getters
 
 mkHKD :: forall rec f tuple. Instantiate rec f tuple => tuple -> HKD rec f
 mkHKD = instantiate @rec @f @tuple

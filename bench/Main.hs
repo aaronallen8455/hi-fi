@@ -1,7 +1,10 @@
+{-# LANGUAGE OverloadedRecordDot #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 import           Criterion.Main
 import           Data.Functor.Identity
 import qualified Data.Generic.HKD as Hig
+import           Data.Generics.Internal.VL
 import           GHC.Generics
 import           HiFi
 
@@ -9,6 +12,12 @@ main :: IO ()
 main = defaultMain
   [ bench "fromRecord (hi-fi)" $ whnf fromRecordHiFi testRec
   , bench "fromRecord (higgledy)" $ whnf fromRecordHiggledy testRec
+  , bench "toRecord (hi-fi)" $ whnf toRecordHiFi (fromRecord testRec)
+  , bench "toRecord (higgledy)" $ whnf toRecordHiggledy (Hig.deconstruct testRec)
+  , bench "instantiate (hi-fi)" $ whnf instantiateHiFi 1
+  , bench "instantiate (higgledy)" $ whnf instantiateHiggledy 1
+  , bench "getter (hi-fi)" $ whnf (\x -> x.t200) (fromRecord testRec)
+  , bench "getter (higgledy)" $ whnf (\x -> x ^. Hig.field @"t200") (fromRecordHiggledy testRec)
   ]
 
 fromRecordHiFi :: Test -> HKD Test Identity
@@ -16,6 +25,820 @@ fromRecordHiFi = fromRecord
 
 fromRecordHiggledy :: Test -> Hig.HKD Test Identity
 fromRecordHiggledy = Hig.deconstruct
+
+toRecordHiFi :: HKD Test Identity -> Test
+toRecordHiFi = toRecord
+
+toRecordHiggledy :: Hig.HKD Test Identity -> Test
+toRecordHiggledy = runIdentity . Hig.construct
+
+instantiateHiFi :: Int -> HKD Test Identity
+instantiateHiFi x = mkHKD
+  { t1 = Identity x
+  , t2 = Identity x
+  , t3 = Identity x
+  , t4 = Identity x
+  , t5 = Identity x
+  , t6 = Identity x
+  , t7 = Identity x
+  , t8 = Identity x
+  , t9 = Identity x
+  , t10 = Identity x
+  , t11 = Identity x
+  , t12 = Identity x
+  , t13 = Identity x
+  , t14 = Identity x
+  , t15 = Identity x
+  , t16 = Identity x
+  , t17 = Identity x
+  , t18 = Identity x
+  , t19 = Identity x
+  , t20 = Identity x
+  , t21 = Identity x
+  , t22 = Identity x
+  , t23 = Identity x
+  , t24 = Identity x
+  , t25 = Identity x
+  , t26 = Identity x
+  , t27 = Identity x
+  , t28 = Identity x
+  , t29 = Identity x
+  , t30 = Identity x
+  , t31 = Identity x
+  , t32 = Identity x
+  , t33 = Identity x
+  , t34 = Identity x
+  , t35 = Identity x
+  , t36 = Identity x
+  , t37 = Identity x
+  , t38 = Identity x
+  , t39 = Identity x
+  , t40 = Identity x
+  , t41 = Identity x
+  , t42 = Identity x
+  , t43 = Identity x
+  , t44 = Identity x
+  , t45 = Identity x
+  , t46 = Identity x
+  , t47 = Identity x
+  , t48 = Identity x
+  , t49 = Identity x
+  , t50 = Identity x
+  , t51 = Identity x
+  , t52 = Identity x
+  , t53 = Identity x
+  , t54 = Identity x
+  , t55 = Identity x
+  , t56 = Identity x
+  , t57 = Identity x
+  , t58 = Identity x
+  , t59 = Identity x
+  , t60 = Identity x
+  , t61 = Identity x
+  , t62 = Identity x
+  , t63 = Identity x
+  , t64 = Identity x
+  , t65 = Identity x
+  , t66 = Identity x
+  , t67 = Identity x
+  , t68 = Identity x
+  , t69 = Identity x
+  , t70 = Identity x
+  , t71 = Identity x
+  , t72 = Identity x
+  , t73 = Identity x
+  , t74 = Identity x
+  , t75 = Identity x
+  , t76 = Identity x
+  , t77 = Identity x
+  , t78 = Identity x
+  , t79 = Identity x
+  , t80 = Identity x
+  , t81 = Identity x
+  , t82 = Identity x
+  , t83 = Identity x
+  , t84 = Identity x
+  , t85 = Identity x
+  , t86 = Identity x
+  , t87 = Identity x
+  , t88 = Identity x
+  , t89 = Identity x
+  , t90 = Identity x
+  , t91 = Identity x
+  , t92 = Identity x
+  , t93 = Identity x
+  , t94 = Identity x
+  , t95 = Identity x
+  , t96 = Identity x
+  , t97 = Identity x
+  , t98 = Identity x
+  , t99 = Identity x
+  , t100 = Identity x
+  , t101 = Identity x
+  , t102 = Identity x
+  , t103 = Identity x
+  , t104 = Identity x
+  , t105 = Identity x
+  , t106 = Identity x
+  , t107 = Identity x
+  , t108 = Identity x
+  , t109 = Identity x
+  , t110 = Identity x
+  , t111 = Identity x
+  , t112 = Identity x
+  , t113 = Identity x
+  , t114 = Identity x
+  , t115 = Identity x
+  , t116 = Identity x
+  , t117 = Identity x
+  , t118 = Identity x
+  , t119 = Identity x
+  , t120 = Identity x
+  , t121 = Identity x
+  , t122 = Identity x
+  , t123 = Identity x
+  , t124 = Identity x
+  , t125 = Identity x
+  , t126 = Identity x
+  , t127 = Identity x
+  , t128 = Identity x
+  , t129 = Identity x
+  , t130 = Identity x
+  , t131 = Identity x
+  , t132 = Identity x
+  , t133 = Identity x
+  , t134 = Identity x
+  , t135 = Identity x
+  , t136 = Identity x
+  , t137 = Identity x
+  , t138 = Identity x
+  , t139 = Identity x
+  , t140 = Identity x
+  , t141 = Identity x
+  , t142 = Identity x
+  , t143 = Identity x
+  , t144 = Identity x
+  , t145 = Identity x
+  , t146 = Identity x
+  , t147 = Identity x
+  , t148 = Identity x
+  , t149 = Identity x
+  , t150 = Identity x
+  , t151 = Identity x
+  , t152 = Identity x
+  , t153 = Identity x
+  , t154 = Identity x
+  , t155 = Identity x
+  , t156 = Identity x
+  , t157 = Identity x
+  , t158 = Identity x
+  , t159 = Identity x
+  , t160 = Identity x
+  , t161 = Identity x
+  , t162 = Identity x
+  , t163 = Identity x
+  , t164 = Identity x
+  , t165 = Identity x
+  , t166 = Identity x
+  , t167 = Identity x
+  , t168 = Identity x
+  , t169 = Identity x
+  , t170 = Identity x
+  , t171 = Identity x
+  , t172 = Identity x
+  , t173 = Identity x
+  , t174 = Identity x
+  , t175 = Identity x
+  , t176 = Identity x
+  , t177 = Identity x
+  , t178 = Identity x
+  , t179 = Identity x
+  , t180 = Identity x
+  , t181 = Identity x
+  , t182 = Identity x
+  , t183 = Identity x
+  , t184 = Identity x
+  , t185 = Identity x
+  , t186 = Identity x
+  , t187 = Identity x
+  , t188 = Identity x
+  , t189 = Identity x
+  , t190 = Identity x
+  , t191 = Identity x
+  , t192 = Identity x
+  , t193 = Identity x
+  , t194 = Identity x
+  , t195 = Identity x
+  , t196 = Identity x
+  , t197 = Identity x
+  , t198 = Identity x
+  , t199 = Identity x
+  , t200 = Identity x
+  , t201 = Identity x
+  , t202 = Identity x
+  , t203 = Identity x
+  , t204 = Identity x
+  , t205 = Identity x
+  , t206 = Identity x
+  , t207 = Identity x
+  , t208 = Identity x
+  , t209 = Identity x
+  , t210 = Identity x
+  , t211 = Identity x
+  , t212 = Identity x
+  , t213 = Identity x
+  , t214 = Identity x
+  , t215 = Identity x
+  , t216 = Identity x
+  , t217 = Identity x
+  , t218 = Identity x
+  , t219 = Identity x
+  , t220 = Identity x
+  , t221 = Identity x
+  , t222 = Identity x
+  , t223 = Identity x
+  , t224 = Identity x
+  , t225 = Identity x
+  , t226 = Identity x
+  , t227 = Identity x
+  , t228 = Identity x
+  , t229 = Identity x
+  , t230 = Identity x
+  , t231 = Identity x
+  , t232 = Identity x
+  , t233 = Identity x
+  , t234 = Identity x
+  , t235 = Identity x
+  , t236 = Identity x
+  , t237 = Identity x
+  , t238 = Identity x
+  , t239 = Identity x
+  , t240 = Identity x
+  , t241 = Identity x
+  , t242 = Identity x
+  , t243 = Identity x
+  , t244 = Identity x
+  , t245 = Identity x
+  , t246 = Identity x
+  , t247 = Identity x
+  , t248 = Identity x
+  , t249 = Identity x
+  , t250 = Identity x
+  , t251 = Identity x
+  , t252 = Identity x
+  , t253 = Identity x
+  , t254 = Identity x
+  , t255 = Identity x
+  , t256 = Identity x
+  , t257 = Identity x
+  , t258 = Identity x
+  , t259 = Identity x
+  , t260 = Identity x
+  , t261 = Identity x
+  , t262 = Identity x
+  , t263 = Identity x
+  , t264 = Identity x
+  , t265 = Identity x
+  , t266 = Identity x
+  , t267 = Identity x
+  , t268 = Identity x
+  , t269 = Identity x
+  , t270 = Identity x
+  , t271 = Identity x
+  , t272 = Identity x
+  , t273 = Identity x
+  , t274 = Identity x
+  , t275 = Identity x
+  , t276 = Identity x
+  , t277 = Identity x
+  , t278 = Identity x
+  , t279 = Identity x
+  , t280 = Identity x
+  , t281 = Identity x
+  , t282 = Identity x
+  , t283 = Identity x
+  , t284 = Identity x
+  , t285 = Identity x
+  , t286 = Identity x
+  , t287 = Identity x
+  , t288 = Identity x
+  , t289 = Identity x
+  , t290 = Identity x
+  , t291 = Identity x
+  , t292 = Identity x
+  , t293 = Identity x
+  , t294 = Identity x
+  , t295 = Identity x
+  , t296 = Identity x
+  , t297 = Identity x
+  , t298 = Identity x
+  , t299 = Identity x
+  , t300 = Identity x
+  , t301 = Identity x
+  , t302 = Identity x
+  , t303 = Identity x
+  , t304 = Identity x
+  , t305 = Identity x
+  , t306 = Identity x
+  , t307 = Identity x
+  , t308 = Identity x
+  , t309 = Identity x
+  , t310 = Identity x
+  , t311 = Identity x
+  , t312 = Identity x
+  , t313 = Identity x
+  , t314 = Identity x
+  , t315 = Identity x
+  , t316 = Identity x
+  , t317 = Identity x
+  , t318 = Identity x
+  , t319 = Identity x
+  , t320 = Identity x
+  , t321 = Identity x
+  , t322 = Identity x
+  , t323 = Identity x
+  , t324 = Identity x
+  , t325 = Identity x
+  , t326 = Identity x
+  , t327 = Identity x
+  , t328 = Identity x
+  , t329 = Identity x
+  , t330 = Identity x
+  , t331 = Identity x
+  , t332 = Identity x
+  , t333 = Identity x
+  , t334 = Identity x
+  , t335 = Identity x
+  , t336 = Identity x
+  , t337 = Identity x
+  , t338 = Identity x
+  , t339 = Identity x
+  , t340 = Identity x
+  , t341 = Identity x
+  , t342 = Identity x
+  , t343 = Identity x
+  , t344 = Identity x
+  , t345 = Identity x
+  , t346 = Identity x
+  , t347 = Identity x
+  , t348 = Identity x
+  , t349 = Identity x
+  , t350 = Identity x
+  , t351 = Identity x
+  , t352 = Identity x
+  , t353 = Identity x
+  , t354 = Identity x
+  , t355 = Identity x
+  , t356 = Identity x
+  , t357 = Identity x
+  , t358 = Identity x
+  , t359 = Identity x
+  , t360 = Identity x
+  , t361 = Identity x
+  , t362 = Identity x
+  , t363 = Identity x
+  , t364 = Identity x
+  , t365 = Identity x
+  , t366 = Identity x
+  , t367 = Identity x
+  , t368 = Identity x
+  , t369 = Identity x
+  , t370 = Identity x
+  , t371 = Identity x
+  , t372 = Identity x
+  , t373 = Identity x
+  , t374 = Identity x
+  , t375 = Identity x
+  , t376 = Identity x
+  , t377 = Identity x
+  , t378 = Identity x
+  , t379 = Identity x
+  , t380 = Identity x
+  , t381 = Identity x
+  , t382 = Identity x
+  , t383 = Identity x
+  , t384 = Identity x
+  , t385 = Identity x
+  , t386 = Identity x
+  , t387 = Identity x
+  , t388 = Identity x
+  , t389 = Identity x
+  , t390 = Identity x
+  , t391 = Identity x
+  , t392 = Identity x
+  , t393 = Identity x
+  , t394 = Identity x
+  , t395 = Identity x
+  , t396 = Identity x
+  , t397 = Identity x
+  , t398 = Identity x
+  , t399 = Identity x
+  , t400 = Identity x
+  }
+
+instantiateHiggledy :: Int -> Hig.HKD Test Identity
+instantiateHiggledy x =
+  Hig.build @Test
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
+    (Identity x)
 
 testRec :: Test
 testRec = Test

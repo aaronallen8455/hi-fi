@@ -59,9 +59,11 @@ benchmark hi-fi-bench
   hs-source-dirs: bench
   main-is: Main.hs
   ghc-options: -fplugin HiFi
+               -freduction-depth=0
   build-depends:
     base,
     hi-fi,
     criterion,
     barbies,
-    higgledy
+    higgledy,
+    generic-lens
