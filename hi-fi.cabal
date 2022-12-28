@@ -72,6 +72,6 @@ executable test
   main-is: Main.hs
   hs-source-dirs: exe
   build-depends: base, hi-fi
-  ghc-options: -fplugin HiFi
+  ghc-options: -fplugin HiFi -ddump-simpl
   default-language: GHC2021
   default-extensions: OverloadedRecordDot

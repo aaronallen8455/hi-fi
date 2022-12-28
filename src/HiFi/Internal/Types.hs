@@ -14,6 +14,7 @@ module HiFi.Internal.Types
   , UnknownField
   , indexArray
   , arrayFromList
+  , unsafeCoerceF
   ) where
 
 import           Data.Kind
@@ -140,5 +141,8 @@ instance
 indexArray :: RecArray -> Int -> Exts.Any
 indexArray = A.indexArray
 
-arrayFromList :: [Exts.Any] -> RecArray
-arrayFromList = A.arrayFromList
+arrayFromList :: forall rec (f :: Type -> Type). [f Exts.Any] -> HKD rec f
+arrayFromList = UnsafeMkHKD . A.arrayFromList
+
+unsafeCoerceF :: forall (f :: Type -> Type) (a :: Type). f a -> f Exts.Any
+unsafeCoerceF = unsafeCoerce
