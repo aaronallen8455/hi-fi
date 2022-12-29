@@ -16,7 +16,6 @@ module HiFi.Api
   , atField
   ) where
 
-import           Control.Monad (foldM_)
 import           Control.Monad.ST
 import           Data.Coerce (coerce)
 import           Data.Functor.Compose (Compose(..))
@@ -28,26 +27,12 @@ import           Unsafe.Coerce (unsafeCoerce)
 
 import           HiFi.Internal.Types (FieldGetters(..), HKD(..), IndexOfField(..), Instantiate(..), ToRecord(..))
 
-import           Debug.Trace
-
 --------------------------------------------------------------------------------
 -- API
 --------------------------------------------------------------------------------
 
 mapEffect :: (forall a. f a -> g a) -> HKD rec f -> HKD rec g
 mapEffect f (UnsafeMkHKD arr) = UnsafeMkHKD $ f <$> arr
-
--- myFmap :: (a -> b) -> A.Array a -> A.Array b
--- myFmap f arr = A.createArray 2 undefined $ \a -> do
---   let go !ix | ix == 2 = pure ()
---       go !ix = do
---         traceShowM ix
---         e <- A.indexArrayM arr ix
---         traceShowM ix
---         A.writeArray a ix (f e)
---         traceShowM ix
---         go $ ix + 1
---   go 0
 
 recSequenceShallow :: forall f g rec. Applicative f
                    => HKD rec (Compose f g) -> f (HKD rec g)

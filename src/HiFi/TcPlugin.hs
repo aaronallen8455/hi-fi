@@ -16,8 +16,6 @@ import           Data.Traversable (for)
 
 import qualified HiFi.GhcFacade as Ghc
 
-import           Debug.Trace
-
 tcPlugin :: Ghc.TcPlugin
 tcPlugin = Ghc.TcPlugin
   { Ghc.tcPluginInit = lookupInputs
@@ -178,19 +176,17 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
     _ -> pure Nothing
 
   let newWanteds = do
-        Just (Just _, ws, ct) <- results
+        Just (Just _, ws, _) <- results
         ws
       insolubles = do
         Just (Nothing, ws, ct) <- results
         ws ++ [ct]
       solveds = do
-        Just (mR, ws, ct) <- results
+        Just (mR, _, ct) <- results
         case mR of
           Just r -> [(r, ct)]
           _ -> []
 
-  traceM $ Ghc.showSDocUnsafe $ Ghc.ppr insolubles
-  traceM $ Ghc.showSDocUnsafe $ Ghc.ppr newWanteds
   pure Ghc.TcPluginSolveResult
     { tcPluginInsolubleCts = insolubles
     , tcPluginSolvedCts = solveds
@@ -513,10 +509,6 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
       pure . Right $ Ghc.mkCoreLams lamArgs bodyExpr
     (wanteds, _) -> pure . Left $ concat wanteds
 
-evExprFromEvTerm :: Ghc.EvTerm -> Maybe Ghc.EvExpr
-evExprFromEvTerm (Ghc.EvExpr x) = Just x
-evExprFromEvTerm _ = Nothing
-
 -- | The output of solving wanted contains references to variables that are not
 -- in scope so an expr must be constructed that binds those variables locally.
 -- The solver seems to always output them in reverse dependency order, hence
@@ -526,28 +518,34 @@ buildEvExprFromMap
   -> Ghc.EvVar
   -> Ghc.EvBindMap
   -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.EvExpr)
-buildEvExprFromMap ctLoc evVar evBindMap =
+buildEvExprFromMap ctLoc evVar evBindMap = do
   let evBinds = Ghc.dVarEnvElts $ Ghc.ev_bind_varenv evBindMap
-      mResult = case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
-        ([m], rest) -> do
-          baseDict <- evExprFromEvTerm $ Ghc.eb_rhs m
+  mResult <- case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
+        ([m], rest) -> fmap snd . Ghc.unsafeTcPluginTcM . Ghc.initDsTc $ do
+          baseDict <- Ghc.dsEvTerm $ Ghc.eb_rhs m
           let go acc x = do
-                evExpr <- evExprFromEvTerm $ Ghc.eb_rhs x
-                Just $ Ghc.bindNonRec (Ghc.eb_lhs x) evExpr acc
+                evExpr <- Ghc.dsEvTerm $ Ghc.eb_rhs x
+                pure $ Ghc.bindNonRec (Ghc.eb_lhs x) evExpr acc
            in foldM go baseDict rest
-        _ -> Nothing
-   in case mResult of
+        _ -> pure Nothing
+  case mResult of
         Nothing -> do
           mCt <- mkNewWantedFromExpr ctLoc evVar
           pure . Left $ maybeToList mCt
         Just result -> do
-          let freeVars = Ghc.exprFreeVars result
-          if Ghc.isEmptyUniqSet freeVars
+          let freeVars = filter (not . isDFunId) $ Ghc.exprFreeVarsList result
+          if null freeVars
              then pure $ Right result
              else do
-               mCts <- traverse (mkNewWantedFromExpr ctLoc)
-                                (Ghc.nonDetEltsUniqSet freeVars)
+               mCts <- traverse (mkNewWantedFromExpr ctLoc) freeVars
                pure . Left $ catMaybes mCts
+
+isDFunId :: Ghc.EvVar -> Bool
+isDFunId var =
+  Ghc.isId var &&
+     case Ghc.idDetails var of
+       Ghc.DFunId{} -> True
+       _ -> False
 
 mkNewWantedFromExpr
   :: Ghc.CtLoc

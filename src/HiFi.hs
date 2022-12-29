@@ -6,17 +6,13 @@ module HiFi
   , module Api
   -- * Plugin
   , plugin
-  -- delete
-  , arrayFromList
-  , unsafeCoerceF
-  , instantiate
   ) where
 
 import           HiFi.Api as Api
 import qualified HiFi.GhcFacade as Ghc
 import           HiFi.ParseResultAction (parseResultAction)
 import           HiFi.TcPlugin (tcPlugin)
-import           HiFi.Internal.Types (FieldName(..), HKD, arrayFromList, unsafeCoerceF, instantiate)
+import           HiFi.Internal.Types (FieldName(..), HKD)
 
 plugin :: Ghc.Plugin
 plugin = Ghc.defaultPlugin
