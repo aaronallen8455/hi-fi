@@ -71,7 +71,7 @@ benchmark hi-fi-bench
 executable test
   main-is: Main.hs
   hs-source-dirs: exe
-  build-depends: base, hi-fi
+  build-depends: base, hi-fi, primitive
   ghc-options: -fplugin HiFi -ddump-simpl
   default-language: GHC2021
   default-extensions: OverloadedRecordDot

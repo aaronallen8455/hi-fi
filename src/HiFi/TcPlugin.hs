@@ -45,6 +45,7 @@ data PluginInputs =
     , missingFieldClass   :: !Ghc.Class
     , unknownFieldClass   :: !Ghc.Class
     , unsafeCoerceFId     :: !Ghc.Id
+    , identityTyCon       :: !Ghc.TyCon
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -57,6 +58,7 @@ findModule name = do
 lookupInputs :: Ghc.TcPluginM PluginInputs
 lookupInputs = do
   hiFiMod <- findModule "HiFi.Internal.Types"
+  identityMod <- findModule "Data.Functor.Identity"
 
   indexOfFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "IndexOfField")
   fieldGettersName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldGetters")
@@ -75,6 +77,7 @@ lookupInputs = do
   missingFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "MissingField")
   unknownFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "UnknownField")
   unsafeCoerceFId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "unsafeCoerceF")
+  identityTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig identityMod (Ghc.mkTcOcc "Identity")
   pure MkPluginInputs{..}
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
@@ -118,7 +121,10 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
 
                  accessor ix =
                    Ghc.mkCoreApps (Ghc.Var indexArrayId)
-                     [Ghc.Var arrBind, Ghc.mkUncheckedIntExpr ix]
+                     [ Ghc.Type recordTy
+                     , Ghc.Type $ Ghc.tyConNullaryTy identityTyCon
+                     , Ghc.Var arrBind, Ghc.mkUncheckedIntExpr ix
+                     ]
                  result =
                    Ghc.mkCoreLams [arrBind] $
                      Ghc.mkCoreConApps recordCon
@@ -172,21 +178,19 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
     _ -> pure Nothing
 
   let newWanteds = do
-        Just (Just _, ws, _) <- results
+        Just (Just _, ws, ct) <- results
         ws
       insolubles = do
-        Just (Nothing, ws, _) <- results
-        ws
+        Just (Nothing, ws, ct) <- results
+        ws ++ [ct]
       solveds = do
-        Just (mR, _, ct) <- results
+        Just (mR, ws, ct) <- results
         case mR of
-          Nothing | not (null insolubles) ->
-            -- Emit a bogus dict if there are insoluables, otherwise they
-            -- don't get reported.
-            [(Ghc.EvExpr Ghc.unitExpr, ct)]
           Just r -> [(r, ct)]
           _ -> []
 
+  traceM $ Ghc.showSDocUnsafe $ Ghc.ppr insolubles
+  traceM $ Ghc.showSDocUnsafe $ Ghc.ppr newWanteds
   pure Ghc.TcPluginSolveResult
     { tcPluginInsolubleCts = insolubles
     , tcPluginSolvedCts = solveds
@@ -310,7 +314,6 @@ gatherTupleFieldsAndBuildExpr MkPluginInputs{..} fieldNamesTys recTy tupleTy eff
     let tupleBind = Ghc.mkLocalIdOrCoVar tupleName Ghc.Many tupleTy
 
     (pairs, expr) <- go [] tupleBind tupleTy
-    traceM $ Ghc.showSDocUnsafe $ Ghc.ppr (Ghc.mkCoreLams [tupleBind] expr)
     pure (pairs, Ghc.mkCoreLams [tupleBind] expr)
   where
     getFieldPairFromTy ty = StateT $ \exprBuilder -> case ty of
@@ -464,7 +467,11 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
             getterExpr =
               Ghc.mkCoreLams [hkdBndr] $
                 Ghc.mkCoreApps (Ghc.Var indexArrayId)
-                               [Ghc.Var hkdBndr, Ghc.mkUncheckedIntExpr idx]
+                               [ Ghc.Type recordTy
+                               , Ghc.Type effectConTy
+                               , Ghc.Var hkdBndr
+                               , Ghc.mkUncheckedIntExpr idx
+                               ]
             predClassArgs = [Ghc.mkAppTys effectConTy [fieldTy]]
 
         predCt <- makeWantedCt ctLoc predClass predClassArgs

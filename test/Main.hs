@@ -398,7 +398,8 @@ testEffectMap = do
 
 testZipping :: Assertion
 testZipping = do
-  let upd = mkHKD { t1a = Just False
+  let upd :: HKD Test1 Maybe
+      upd = mkHKD { t1a = Just False
                   , t1b = Nothing
                   , t1c = Nothing
                   , t1d = Just 9.99
@@ -406,7 +407,7 @@ testZipping = do
                   }
       new = recZipWith (`maybe` Identity) (fromRecord testInput1) upd
       expected = testInput1 { t1a = False, t1d = 9.99, t1e = "cde" }
-  expected @=? toRecord new
+  show expected @=? show (toRecord new)
 
 testFill :: Assertion
 testFill = do

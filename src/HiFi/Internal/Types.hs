@@ -138,8 +138,8 @@ instance
 -- Utils
 --------------------------------------------------------------------------------
 
-indexArray :: RecArray -> Int -> Exts.Any
-indexArray = A.indexArray
+indexArray :: forall (rec :: Type) (f :: Type -> Type). HKD rec f -> Int -> f Exts.Any
+indexArray (UnsafeMkHKD arr) = A.indexArray arr
 
 arrayFromList :: forall rec (f :: Type -> Type). [f Exts.Any] -> HKD rec f
 arrayFromList = UnsafeMkHKD . A.arrayFromList

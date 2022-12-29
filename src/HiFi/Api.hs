@@ -37,6 +37,18 @@ import           Debug.Trace
 mapEffect :: (forall a. f a -> g a) -> HKD rec f -> HKD rec g
 mapEffect f (UnsafeMkHKD arr) = UnsafeMkHKD $ f <$> arr
 
+-- myFmap :: (a -> b) -> A.Array a -> A.Array b
+-- myFmap f arr = A.createArray 2 undefined $ \a -> do
+--   let go !ix | ix == 2 = pure ()
+--       go !ix = do
+--         traceShowM ix
+--         e <- A.indexArrayM arr ix
+--         traceShowM ix
+--         A.writeArray a ix (f e)
+--         traceShowM ix
+--         go $ ix + 1
+--   go 0
+
 recSequenceShallow :: forall f g rec. Applicative f
                    => HKD rec (Compose f g) -> f (HKD rec g)
 recSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse coerce arr
@@ -101,7 +113,7 @@ fromRecord rec =
 --     . A.arrayFromList
 --     $ fieldGetters @rec
 
-mkHKD :: forall rec f tuple. Instantiate rec f tuple => tuple -> HKD rec f
+mkHKD :: forall rec f tuple. (Instantiate rec f tuple) => tuple -> HKD rec f
 mkHKD = instantiate @rec @f @tuple
 
 setField
