@@ -86,17 +86,18 @@ toRecord (UnsafeMkHKD arr) = toRecord' $ coerce arr
 
 fromRecord :: forall rec. FieldGetters rec => rec -> HKD rec Identity
 fromRecord rec =
-  let getters = fieldGetters @rec
-   in UnsafeMkHKD $ A.createArray (length getters) undefined $ \arr -> do
-    let go !ix (x:xs) = do
-          A.writeArray arr ix (coerce $ x rec)
-          go (ix + 1) xs
-        go _ [] = pure ()
-    go 0 getters
---   UnsafeMkHKD
---     . fmap (coerce . ($ rec))
---     . A.arrayFromList
---     $ fieldGetters @rec
+-- This is a faster implementation but seemingly mixes up elements when optimizations are on.
+--   let getters = fieldGetters @rec
+--    in UnsafeMkHKD $ A.createArray (length getters) undefined $ \arr -> do
+--     let go !ix (x:xs) = do
+--           A.writeArray arr ix (coerce $ x rec)
+--           go (ix + 1) xs
+--         go _ [] = pure ()
+--     go 0 getters
+  UnsafeMkHKD
+    . fmap (coerce . ($ rec))
+    . A.arrayFromList
+    $ fieldGetters @rec
 
 mkHKD :: forall rec f tuple. (Instantiate rec f tuple) => tuple -> HKD rec f
 mkHKD = instantiate @rec @f @tuple

@@ -15,8 +15,6 @@ import           Test.QuickCheck.Property.Monoid
 
 import           HiFi
 
-import           Debug.Trace
-
 main :: IO ()
 main = defaultMain tests
 

@@ -533,6 +533,8 @@ buildEvExprFromMap ctLoc evVar evBindMap = do
           mCt <- mkNewWantedFromExpr ctLoc evVar
           pure . Left $ maybeToList mCt
         Just result -> do
+          -- Filter out DFunId vars, which are valid even though they are
+          -- considered free vars by GHC.
           let freeVars = filter (not . isDFunId) $ Ghc.exprFreeVarsList result
           if null freeVars
              then pure $ Right result
