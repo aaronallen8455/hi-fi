@@ -4,3 +4,17 @@ source-repository-package
     type: git
     location: https://github.com/aaronallen8455/named.git
     tag: 10eb608ca3f694b281332a7c1822763ba4e71c58
+
+source-repository-package
+  type: git
+  location: https://wims-read-only:wVNuyyRwzAqqM7FmXAMH@gitlab.com/heb-engineering/projects/libraries/haskell/schwarma.git
+  tag: eb2dfe4094b52a6740235ac243c0003cfa2b5b69
+  subdir: schwarma-aeson
+
+source-repository-package
+  type: git
+  location: https://wims-read-only:wVNuyyRwzAqqM7FmXAMH@gitlab.com/heb-engineering/projects/libraries/haskell/schwarma.git
+  tag: eb2dfe4094b52a6740235ac243c0003cfa2b5b69
+  subdir: schwarma-core
+
+allow-newer: schwarma-aeson:aeson

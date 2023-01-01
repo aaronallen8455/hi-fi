@@ -242,7 +242,6 @@ mkFieldTypeCheckWanteds
   -> Ghc.TcPluginM [Ghc.Ct]
 mkFieldTypeCheckWanteds inp ctLoc recTy recordFieldMap tuplePairs effectCon = do
   let matchResults = getFieldMatchResults recordFieldMap tuplePairs
-  -- TODO generate error messages from missing or extra fields instead of just failing
   let go = \case
         Match labelFs recFieldTy tupleTy -> do
           let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs

@@ -111,14 +111,7 @@ type FieldTypeCheck :: Symbol -> (Type -> Type) -> Type -> Type -> Constraint
 class FieldTypeCheck fieldName f recordTy userTy
 
 -- This equality constraint helps resolve ambiguous terms such as literals and Nothing.
-instance (a ~ b, f ~ g) => FieldTypeCheck fieldName f a (g b)
-
-instance {-# INCOHERENT #-}
-  TypeError
-       (Text "Expected '" :<>: ShowType (f a)
-   :<>: Text "', got '" :<>: ShowType b
-   :<>: Text "' for field '" :<>: Text fieldName :<>: Text "'")
-  => FieldTypeCheck fieldName f a b
+instance (f a ~ b) => FieldTypeCheck fieldName f a b
 
 type MissingField :: Symbol -> Type -> Constraint
 class MissingField fieldName rec

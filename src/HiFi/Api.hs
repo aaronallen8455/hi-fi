@@ -8,10 +8,12 @@ module HiFi.Api
   , recTraverse
   , recCotraverse
   , recZipWith
+  , recPure
   , toRecord
   , fromRecord
   , mkHKD
   , setField
+  , getField
   , fill
   , atField
   ) where
@@ -81,23 +83,23 @@ recZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ d
   i <- [0 .. A.sizeofArray a - 1]
   [ f (A.indexArray a i) (A.indexArray b i) ]
 
+recPure :: (Applicative f, FieldGetters rec) => rec -> HKD rec f
+recPure = mapEffect (pure . coerce) . fromRecord
+
 toRecord :: ToRecord rec => HKD rec Identity -> rec
 toRecord (UnsafeMkHKD arr) = toRecord' $ coerce arr
 
+-- This function must be inlined, otherwise it behaves incorrectly with >O0
+{-# INLINE fromRecord #-}
 fromRecord :: forall rec. FieldGetters rec => rec -> HKD rec Identity
 fromRecord rec =
--- This is a faster implementation but seemingly mixes up elements when optimizations are on.
---   let getters = fieldGetters @rec
---    in UnsafeMkHKD $ A.createArray (length getters) undefined $ \arr -> do
---     let go !ix (x:xs) = do
---           A.writeArray arr ix (coerce $ x rec)
---           go (ix + 1) xs
---         go _ [] = pure ()
---     go 0 getters
-  UnsafeMkHKD
-    . fmap (coerce . ($ rec))
-    . A.arrayFromList
-    $ fieldGetters @rec
+  let getters = fieldGetters @rec
+   in UnsafeMkHKD $ A.createArray (length getters) (error "fromRecord: impossible") $ \arr -> do
+    let go !ix (x:xs) = do
+          A.writeArray arr ix (coerce $ x rec)
+          go (ix + 1) xs
+        go _ [] = pure ()
+    go 0 getters
 
 mkHKD :: forall rec f tuple. (Instantiate rec f tuple) => tuple -> HKD rec f
 mkHKD = instantiate @rec @f @tuple
