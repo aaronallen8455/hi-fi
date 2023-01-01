@@ -14,7 +14,7 @@ extra-doc-files:    CHANGELOG.md
 -- extra-source-files:
 
 common warnings
-    ghc-options: -Wall
+    ghc-options: -Wall -Wno-unticked-promoted-constructors
 
 library
     import:           warnings
@@ -25,7 +25,7 @@ library
                    HiFi.TcPlugin,
                    HiFi.ParseResultAction
     -- other-extensions:
-    build-depends:    base ^>=4.17.0.0,
+    build-depends:    base >=4.16.0.0 && <4.18.0.0,
                       ghc >= 9.2.0,
                       primitive,
                       syb,
@@ -46,7 +46,7 @@ test-suite hi-fi-test
                  -Wno-orphans
                  -O2
     build-depends:
-        base ^>=4.17.0.0,
+        base >=4.16.0.0 && <4.18.0.0,
         hi-fi,
         tasty,
         tasty-hunit,

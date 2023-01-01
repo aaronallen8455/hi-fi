@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE MultiWayIf #-}
@@ -20,7 +21,9 @@ tcPlugin :: Ghc.TcPlugin
 tcPlugin = Ghc.TcPlugin
   { Ghc.tcPluginInit = lookupInputs
   , Ghc.tcPluginSolve = tcSolver
+#if MIN_VERSION_ghc(9,4,0)
   , Ghc.tcPluginRewrite = mempty
+#endif
   , Ghc.tcPluginStop = \_ -> pure ()
   }
 
@@ -48,7 +51,7 @@ data PluginInputs =
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
 findModule name = do
-  findResult <- Ghc.findImportedModule (Ghc.mkModuleName name) Ghc.NoPkgQual
+  findResult <- Ghc.findImportedModule' (Ghc.mkModuleName name)
   case findResult of
     Ghc.Found _ res -> pure res
     _               -> error "preposterous!"
@@ -187,11 +190,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
           Just r -> [(r, ct)]
           _ -> []
 
-  pure Ghc.TcPluginSolveResult
-    { tcPluginInsolubleCts = insolubles
-    , tcPluginSolvedCts = solveds
-    , tcPluginNewCts = newWanteds
-    }
+  pure $ Ghc.mkTcPluginSolveResult newWanteds insolubles solveds
 
 getStrTyLitVal :: Ghc.Type -> Maybe Ghc.FastString
 getStrTyLitVal = \case
@@ -275,7 +274,9 @@ makeWantedCt ctLoc clss classArgs = do
     , Ghc.cc_class = clss
     , Ghc.cc_tyargs = classArgs
     , Ghc.cc_pend_sc = False
+#if MIN_VERSION_ghc(9,4,0)
     , Ghc.cc_fundeps = False
+#endif
     }
 
 getFieldMatchResults
@@ -457,9 +458,8 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
         :: (Integer, (Ghc.FastString, Ghc.Type))
         -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
       mkFieldGenExpr (idx, (fieldName, fieldTy)) = do
-        stringIds <- Ghc.getMkStringIds Ghc.tcLookupId
-        let fieldNameExpr = Ghc.mkStringExprFSWith stringIds fieldName
-            getterExpr =
+        fieldNameExpr <- Ghc.mkStringExprFS' fieldName
+        let getterExpr =
               Ghc.mkCoreLams [hkdBndr] $
                 Ghc.mkCoreApps (Ghc.Var indexArrayId)
                                [ Ghc.Type recordTy
@@ -520,13 +520,14 @@ buildEvExprFromMap
 buildEvExprFromMap ctLoc evVar evBindMap = do
   let evBinds = Ghc.dVarEnvElts $ Ghc.ev_bind_varenv evBindMap
   mResult <- case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
-        ([m], rest) -> fmap snd . Ghc.unsafeTcPluginTcM . Ghc.initDsTc $ do
-          baseDict <- Ghc.dsEvTerm $ Ghc.eb_rhs m
-          let go acc x = do
-                evExpr <- Ghc.dsEvTerm $ Ghc.eb_rhs x
-                pure $ Ghc.bindNonRec (Ghc.eb_lhs x) evExpr acc
-           in foldM go baseDict rest
-        _ -> pure Nothing
+    ([m], rest) -> Ghc.unsafeTcPluginTcM . Ghc.initDsTc' $ do
+      baseDict <- Ghc.dsEvTerm $ Ghc.eb_rhs m
+      let go :: Ghc.EvExpr -> Ghc.EvBind -> Ghc.DsM Ghc.EvExpr
+          go acc x = do
+            evExpr <- Ghc.dsEvTerm $ Ghc.eb_rhs x
+            pure $ Ghc.bindNonRec (Ghc.eb_lhs x) evExpr acc
+       in foldM go baseDict rest
+    _ -> pure Nothing
   case mResult of
         Nothing -> do
           mCt <- mkNewWantedFromExpr ctLoc evVar

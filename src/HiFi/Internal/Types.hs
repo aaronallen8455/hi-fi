@@ -1,3 +1,4 @@
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DataKinds #-}
@@ -63,7 +64,8 @@ instance FoldFields Eq rec f => Eq (HKD rec f) where
 
 instance FoldFields Show rec f => Show (HKD rec f) where
   show rec =
-    let go fieldName getter =
+    let go :: forall a. Show (f a) => String -> (HKD rec f -> f a) -> String
+        go fieldName getter =
           fieldName <> " = " <> show (getter rec)
      in "HKD {" <> List.intercalate ", " (foldFields @Show @rec @f go [] (:)) <> "}"
 

@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -12,22 +14,36 @@ import qualified Data.Generics as Syb
 
 import qualified HiFi.GhcFacade as Ghc
 
+#if MIN_VERSION_ghc(9,4,0)
 parseResultAction :: Ghc.ModSummary -> Ghc.ParsedResult -> Ghc.Hsc Ghc.ParsedResult
+#elif MIN_VERSION_ghc(9,2,0)
+parseResultAction :: Ghc.ModSummary -> Ghc.HsParsedModule -> Ghc.Hsc Ghc.HsParsedModule
+#endif
 parseResultAction modSummary parsedResult = do
-  let mSrcCodeBuffer = Ghc.ms_hspp_buf modSummary
-      parsedModule = Ghc.parsedResultModule parsedResult
-      applyTransform mo =
+  let applyTransform mo =
         mo { Ghc.hsmodDecls = Syb.everywhere (Syb.mkT transformMkHKD)
                             $ Ghc.hsmodDecls mo
            }
+      mSrcCodeBuffer = Ghc.ms_hspp_buf modSummary
+#if MIN_VERSION_ghc(9,4,0)
+      parsedModule = Ghc.parsedResultModule parsedResult
+#elif MIN_VERSION_ghc(9,2,0)
+      parsedModule = parsedResult
+#endif
       newModule = applyTransform <$> Ghc.hpm_module parsedModule
 
   -- To prevent doing a traversal of the AST in vain, check if the source code
   -- contains the target string, otherwise no-op
   case containsMatch "mkHKD" <$> mSrcCodeBuffer of
-    Just False -> pure parsedResult
-    _ -> pure parsedResult
+    Just False ->
+      pure parsedResult
+    _ ->
+#if MIN_VERSION_ghc(9,4,0)
+      pure parsedResult
         { Ghc.parsedResultModule = parsedModule { Ghc.hpm_module = newModule } }
+#elif MIN_VERSION_ghc(9,2,0)
+      pure parsedResult { Ghc.hpm_module = newModule }
+#endif
 
 containsMatch :: BS.ByteString -> Ghc.StringBuffer -> Bool
 containsMatch needle buf =
@@ -41,31 +57,18 @@ transformMkHKD = \case
     Ghc.RecordUpd{..}
       | checkExpr (Ghc.unLoc rupd_expr)
       , Left fields <- rupd_flds
-      -> let fieldPairs = getFieldPair . Ghc.unLoc <$> fields
+      -> let fieldPairs = Ghc.getFieldPair . Ghc.unLoc <$> fields
              tuple = mkTupleFromFields fieldPairs
           in Ghc.unLoc $ Ghc.nlHsApp rupd_expr tuple
     other -> other
   where
     checkExpr = \case
       Ghc.HsVar _ (Ghc.unLoc -> updVar)
-        | extractName updVar == Ghc.mkFastString "mkHKD"
+        | Ghc.extractName updVar == Ghc.mkFastString "mkHKD"
         -> True
-      Ghc.HsPar _ _ expr _ -> checkExpr $ Ghc.unLoc expr
+      Ghc.HsPar' expr -> checkExpr $ Ghc.unLoc expr
       Ghc.HsAppType _ expr _ -> checkExpr $ Ghc.unLoc expr
       _ -> False
-
-getFieldPair
-  :: Ghc.HsRecUpdField Ghc.GhcPs
-  -> (Ghc.FastString, Ghc.HsExpr Ghc.GhcPs)
-getFieldPair Ghc.HsFieldBind {..} =
-  ( getFieldName $ Ghc.unLoc hfbLHS
-  , Ghc.unLoc hfbRHS)
-
-extractName :: Ghc.RdrName -> Ghc.FastString
-extractName = Ghc.occNameFS . Ghc.rdrNameOcc
-
-getFieldName :: Ghc.AmbiguousFieldOcc Ghc.GhcPs -> Ghc.FastString
-getFieldName = extractName . Ghc.rdrNameAmbiguousFieldOcc
 
 mkTupleFromFields
   :: [(Ghc.FastString, Ghc.HsExpr Ghc.GhcPs)]
