@@ -18,6 +18,7 @@ module HiFi.Internal.Types
   , unsafeCoerceF
   ) where
 
+import           Control.DeepSeq (NFData(..))
 import           Data.Kind
 import qualified Data.List as List
 import qualified Data.Primitive.Array as A
@@ -74,6 +75,12 @@ instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
     let go :: forall a. Ord (f a) => String -> (HKD rec f -> f a) -> Ordering
         go _ getter = compare (getter a) (getter b)
      in foldFields @Ord @rec @f go mempty (<>)
+
+instance FoldFields NFData rec f => NFData (HKD rec f) where
+  rnf hkd =
+    let go :: forall a. NFData (f a) => String -> (HKD rec f -> f a) -> ()
+        go _ getter = rnf (getter hkd)
+     in foldFields @NFData @rec @f go () (\() () -> ())
 
 instance (HasField (name :: Symbol) rec a, IndexOfField name rec)
     => HasField name (HKD rec f) (f a) where

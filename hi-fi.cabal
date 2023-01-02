@@ -30,7 +30,8 @@ library
                       primitive,
                       syb,
                       transformers,
-                      bytestring
+                      bytestring,
+                      deepseq
     hs-source-dirs:   src
     default-language: GHC2021
 
@@ -77,6 +78,5 @@ benchmark hi-fi-bench
     base,
     hi-fi,
     criterion,
-    barbies,
     higgledy,
     generic-lens
