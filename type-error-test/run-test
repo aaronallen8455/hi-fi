@@ -1,0 +1,17 @@
+#!/bin/bash
+set -e
+
+cabal exec cabal v2-run type-error-test/MissingField.hs 2>&1 | grep "Missing field 'f3' of 'TestRec'" > /dev/null
+echo "missing field passed"
+
+cabal exec cabal v2-run type-error-test/UnknownField.hs 2>&1 | grep "Unknown field 'f4' for 'TestRec'" > /dev/null
+echo "unknown field passed"
+
+cabal exec cabal v2-run type-error-test/IncorrectType.hs 2>&1 | grep "Couldn't match type ‘\[Char]’ with ‘()’" > /dev/null
+echo "incorrect type passed"
+
+cabal exec cabal v2-run type-error-test/IncorrectFunctor.hs 2>&1 | grep "Couldn't match type: Maybe \[Char]" > /dev/null
+echo "incorrect functor passed"
+
+cabal exec cabal v2-run type-error-test/UnsatisfiedConstraint.hs 2>&1 | grep "No instance for (Show X) arising from a use of ‘show’" > /dev/null
+echo "unsatisfied constraint passed"

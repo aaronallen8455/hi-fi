@@ -53,6 +53,18 @@ test-suite hi-fi-test
         tasty-quickcheck,
         quickcheck-properties
 
+test-suite hi-fi-type-errors
+  import: warnings
+  default-language: GHC2021
+  type: exitcode-stdio-1.0
+  hs-source-dirs: type-error-test
+  main-is: Main.hs
+  build-depends:
+      base,
+      process,
+      tasty,
+      tasty-hunit
+
 benchmark hi-fi-bench
   import: warnings
   default-language: GHC2021
