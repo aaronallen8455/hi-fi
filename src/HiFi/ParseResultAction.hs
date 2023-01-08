@@ -13,6 +13,7 @@ import qualified Data.ByteString.Internal as BSI
 import qualified Data.Generics as Syb
 
 import qualified HiFi.GhcFacade as Ghc
+import qualified HiFi.StringSing as StringSing
 
 #if MIN_VERSION_ghc(9,4,0)
 parseResultAction :: Ghc.ModSummary -> Ghc.ParsedResult -> Ghc.Hsc Ghc.ParsedResult
@@ -83,7 +84,7 @@ mkTupleFromFields (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)) =
       Ghc.mkLHsTupleExpr
         [Ghc.noLocA $ mkFieldNameExpr fieldName, Ghc.noLocA expr]
         mempty
-    mkFieldNameExpr fieldName =
+    mkFieldNameExprDataKinds fieldName =
       Ghc.HsAppType
         Ghc.noSrcSpan
         (Ghc.noLocA $
@@ -95,6 +96,27 @@ mkTupleFromFields (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)) =
           Ghc.HsTyLit Ghc.NoExtField
             (Ghc.HsStrTy Ghc.NoSourceText fieldName)
         )
+    mkFieldNameExpr :: Ghc.FastString -> Ghc.HsExpr Ghc.GhcPs
+    mkFieldNameExpr fieldName =
+      let stringSing = foldr mkStringSing (mkDataName "SSNil")
+                     $ Ghc.unpackFS fieldName
+          mkStringSing c acc =
+            if StringSing.allowedChar c
+               then Ghc.HsApp Ghc.noComments
+                      (Ghc.noLocA . mkDataName $ "SS" ++ [c])
+                      (Ghc.noLocA acc)
+               else mkFieldNameExprDataKinds fieldName
+          mkDataName name =
+            Ghc.HsVar Ghc.noExtField $
+              Ghc.L Ghc.noSrcSpanA . Ghc.mkUnqual Ghc.dataName $
+                Ghc.mkFastString name
+       in Ghc.HsApp
+            Ghc.noComments
+            (Ghc.noLocA . Ghc.HsVar Ghc.noExtField
+              . Ghc.L Ghc.noSrcSpanA . Ghc.mkUnqual Ghc.varName $
+                  Ghc.mkFastString "toFieldName"
+            )
+            (Ghc.noLocA stringSing)
 
 unitHsExpr :: Ghc.LHsExpr Ghc.GhcPs
 unitHsExpr = Ghc.nlHsVar (Ghc.Exact $ Ghc.getName Ghc.unitDataCon)

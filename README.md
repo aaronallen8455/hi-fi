@@ -21,3 +21,5 @@ recordUpdate =
 ```
 
 - Does not work with `NamedFieldPuns` or `RecordWildCards`
+- You need `DataKinds` and `TypeApplications` turned on when working with
+  records that have non-standard characters in field names.

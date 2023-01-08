@@ -17,6 +17,8 @@ module HiFi.Api
   , getField
   , fill
   , atField
+  , StringSing(..)
+  , toFieldName
   ) where
 
 import           Control.Monad.ST
@@ -29,6 +31,7 @@ import           GHC.TypeLits
 import           Unsafe.Coerce (unsafeCoerce)
 
 import           HiFi.Internal.Types (FieldGetters(..), HKD(..), IndexOfField(..), Instantiate(..), ToRecord(..))
+import           HiFi.StringSing (StringSing(..), toFieldName)
 
 --------------------------------------------------------------------------------
 -- API

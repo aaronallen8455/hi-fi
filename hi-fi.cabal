@@ -23,7 +23,8 @@ library
     other-modules: HiFi.GhcFacade,
                    HiFi.Api,
                    HiFi.TcPlugin,
-                   HiFi.ParseResultAction
+                   HiFi.ParseResultAction,
+                   HiFi.StringSing
     -- other-extensions:
     build-depends:    base >=4.16.0.0 && <4.18.0.0,
                       ghc >= 9.2.0,

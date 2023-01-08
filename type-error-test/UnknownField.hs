@@ -5,8 +5,6 @@ build-depends:
 -}
 
 {-# OPTIONS_GHC -fplugin HiFi #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE TypeApplications #-}
 
 import           HiFi
 
