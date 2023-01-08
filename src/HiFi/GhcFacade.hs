@@ -45,6 +45,7 @@ import           GHC.Settings.Constants as Ghc
 import           GHC.Data.StringBuffer as Ghc
 import           GHC.HsToCore.Binds as Ghc
 import           GHC.HsToCore.Monad as Ghc hiding (newUnique)
+import           GHC.Tc.Types.Origin as Ghc
 
 #elif MIN_VERSION_ghc(9,2,0)
 import           GHC.Plugins as Ghc hiding (TcPlugin, varName, substTy, isInScope, extendTvSubst)
