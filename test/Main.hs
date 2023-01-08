@@ -80,7 +80,7 @@ testSequence = do
                   , t1e = e
                   }
       app = Test1 <$> a <*> b <*> c <*> d <*> e
-  app @=? recSequence hkd
+  app @=? hkdSequence hkd
 
 testInstantiation :: Assertion
 testInstantiation = do
@@ -90,7 +90,7 @@ testInstantiation = do
                   , t1b = pure testInput1.t1b
                   , t1d = pure testInput1.t1d
                   }
-  Just testInput1 @=? recSequence hkd
+  Just testInput1 @=? hkdSequence hkd
 
 testLiterals :: Assertion
 testLiterals = do
@@ -116,7 +116,7 @@ testParameterized = do
       r = Test3 { t3a = True
                 , t3b = [Just ()]
                 }
-  [r] @=? recSequence hkd
+  [r] @=? hkdSequence hkd
 
 testTypeApplications :: Assertion
 testTypeApplications = do
@@ -392,7 +392,7 @@ testLargeRecord = do
 testEffectMap :: Assertion
 testEffectMap = do
   let hkd = mapEffect (Just . runIdentity) $ fromRecord testInput1
-  Just testInput1 @=? recSequence hkd
+  Just testInput1 @=? hkdSequence hkd
 
 testZipping :: Assertion
 testZipping = do
@@ -403,14 +403,14 @@ testZipping = do
                   , t1d = Just 9.99
                   , t1e = Just $ UnicodeString "cde"
                   }
-      new = recZipWith (`maybe` Identity) (fromRecord testInput1) upd
+      new = hkdZipWith (`maybe` Identity) (fromRecord testInput1) upd
       expected = testInput1 { t1a = False, t1d = 9.99, t1e = "cde" }
   show expected @=? show (toRecord new)
 
 testFill :: Assertion
 testFill = do
   let hkd = fill @Test1 []
-  [] @=? recSequence hkd
+  [] @=? hkdSequence hkd
 
 testEq :: Property
 testEq =
@@ -440,7 +440,7 @@ testDistribute = do
                   , t1d = [4.5, 9.9]
                   , t1e = [UnicodeString "abc", UnicodeString "..."]
                   }
-  hkd @=? recDistribute recs
+  hkd @=? hkdDistribute recs
 
 testHkdDistribute :: Assertion
 testHkdDistribute = do
@@ -464,7 +464,7 @@ testHkdDistribute = do
               , t1d = Compose [Just 9.9, Nothing]
               , t1e = Compose [Nothing, Nothing]
               }
-  hkd @=? hkdDistribute hkds
+  hkd @=? hkdDistributeShallow hkds
 
 data Test1 = Test1
   { t1a :: Bool
@@ -493,7 +493,7 @@ data Test2 = Test2
   } deriving (Eq, Show)
 
 instance Arbitrary (HKD Test2 Identity) where
-  arbitrary = fromRecord <$> recSequence mkHKD
+  arbitrary = fromRecord <$> hkdSequence mkHKD
     { t2a = arbitrary
     , t2b = arbitrary
     , t2c = arbitrary

@@ -2,14 +2,14 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module HiFi.Api
   ( mapEffect
-  , recSequenceShallow
-  , recSequence
-  , recDistribute
+  , hkdSequenceShallow
+  , hkdSequence
   , hkdDistribute
-  , recTraverse
-  , recCotraverse
-  , recZipWith
-  , recPure
+  , hkdDistributeShallow
+  , hkdTraverse
+  , hkdCotraverse
+  , hkdZipWith
+  , hkdPure
   , toRecord
   , fromRecord
   , mkHKD
@@ -37,55 +37,57 @@ import           HiFi.Internal.Types (FieldGetters(..), HKD(..), IndexOfField(..
 mapEffect :: (forall a. f a -> g a) -> HKD rec f -> HKD rec g
 mapEffect f (UnsafeMkHKD arr) = UnsafeMkHKD $ f <$> arr
 
-recSequenceShallow :: forall f g rec. Applicative f
+hkdSequenceShallow :: forall f g rec. Applicative f
                    => HKD rec (Compose f g) -> f (HKD rec g)
-recSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse coerce arr
+hkdSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse coerce arr
 
-recSequence :: forall f rec. (Applicative f, ToRecord rec) => HKD rec f -> f rec
-recSequence = fmap toRecord
-            . recSequenceShallow @f @Identity
+hkdSequence :: forall f rec. (Applicative f, ToRecord rec) => HKD rec f -> f rec
+hkdSequence = fmap toRecord
+            . hkdSequenceShallow @f @Identity
             . mapEffect (coerce . fmap Identity)
 
-recDistribute :: forall rec f. (FieldGetters rec, Functor f)
+hkdDistribute :: forall rec f. (FieldGetters rec, Functor f)
               => f rec -> HKD rec f
-recDistribute fRec =
+hkdDistribute fRec =
   let getters = fieldGetters @rec
       fields = (`fmap` fRec) <$> getters
    in coerce $ A.arrayFromList fields
 
-hkdDistribute :: forall rec f g. (FieldGetters rec, Functor f, Functor g)
-              => f (HKD rec g) -> HKD rec (Compose f g)
-hkdDistribute fHKD =
+hkdDistributeShallow
+  :: forall rec f g. (FieldGetters rec, Functor f, Functor g)
+  => f (HKD rec g)
+  -> HKD rec (Compose f g)
+hkdDistributeShallow fHKD =
   let getters = fieldGetters @rec
    in coerce . A.arrayFromList $ do
         idx <- fst <$> zip [0..] getters
         pure . Compose $ fmap (\(UnsafeMkHKD arr) -> A.indexArray arr idx) fHKD
 
-recTraverse
+hkdTraverse
   :: Applicative t
   => (forall a. f a -> t (g a))
   -> HKD rec f
   -> t (HKD rec g)
-recTraverse f = recSequenceShallow . mapEffect (coerce . f)
+hkdTraverse f = hkdSequenceShallow . mapEffect (coerce . f)
 
-recCotraverse
+hkdCotraverse
   :: (Functor f, Functor t, FieldGetters rec)
   => (forall a. t (f a) -> g a)
   -> t (HKD rec f)
   -> HKD rec g
-recCotraverse f = mapEffect (f . getCompose) . hkdDistribute
+hkdCotraverse f = mapEffect (f . getCompose) . hkdDistributeShallow
 
-recZipWith
+hkdZipWith
   :: (forall a. f a -> g a -> h a)
   -> HKD rec f
   -> HKD rec g
   -> HKD rec h
-recZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ do
+hkdZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ do
   i <- [0 .. A.sizeofArray a - 1]
   [ f (A.indexArray a i) (A.indexArray b i) ]
 
-recPure :: (Applicative f, FieldGetters rec) => rec -> HKD rec f
-recPure = mapEffect (pure . coerce) . fromRecord
+hkdPure :: (Applicative f, FieldGetters rec) => rec -> HKD rec f
+hkdPure = mapEffect (pure . coerce) . fromRecord
 
 toRecord :: ToRecord rec => HKD rec Identity -> rec
 toRecord (UnsafeMkHKD arr) = toRecord' $ coerce arr
