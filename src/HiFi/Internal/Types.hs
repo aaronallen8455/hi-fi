@@ -23,8 +23,11 @@ import           Data.Kind
 import qualified Data.List as List
 import qualified Data.Primitive.Array as A
 import qualified GHC.Exts as Exts
+import           GHC.Read (readPrec)
 import           GHC.Records
 import           GHC.TypeLits
+import qualified Text.ParserCombinators.ReadP as ReadP
+import qualified Text.ParserCombinators.ReadPrec as ReadPrec
 import           Unsafe.Coerce (unsafeCoerce)
 
 type HKD :: Type -> (Type -> Type) -> Type
@@ -69,6 +72,26 @@ instance FoldFields Show rec f => Show (HKD rec f) where
         go fieldName getter =
           fieldName <> " = " <> show (getter rec)
      in "HKD {" <> List.intercalate ", " (foldFields @Show @rec @f go [] (:)) <> "}"
+
+instance FoldFields Read rec f => Read (HKD rec f) where
+  readPrec = do
+    let go :: forall a. Read (f a) => String -> (HKD rec f -> f a) -> ReadPrec.ReadPrec (f Exts.Any)
+        go fieldName _ = do
+          ReadPrec.lift $ do
+            _ <- ReadP.string fieldName
+            ReadP.skipSpaces
+            _ <- ReadP.char '='
+            ReadP.skipSpaces
+          x <- readPrec @(f a)
+          ReadPrec.lift $ do
+            ReadP.skipSpaces
+            ReadP.optional $ ReadP.char ','
+            ReadP.skipSpaces
+          pure $ unsafeCoerce x
+    ReadPrec.lift $ ReadP.string "HKD {" >> ReadP.skipSpaces
+    fields <- sequence $ foldFields @Read @rec @f go [] (:)
+    _ <- ReadPrec.lift $ ReadP.char '}'
+    pure . UnsafeMkHKD $ A.fromList fields
 
 instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
   compare a b =

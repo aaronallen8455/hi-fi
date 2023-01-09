@@ -37,6 +37,7 @@ tests = testGroup "tests"
   , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD Test2 Identity)))
   , testProperty "Eq" testEq
   , testProperty "Ord" testOrd
+  , testProperty "Show / Read" testShowRead
   , testCase "distribute" testDistribute
   , testCase "hkd distribute" testHkdDistribute
   ]
@@ -423,6 +424,11 @@ testOrd =
   forAll (arbitrary @Test1) $ \x ->
     forAll arbitrary $ \y ->
       compare x y === compare (fromRecord x) (fromRecord y)
+
+testShowRead :: Property
+testShowRead =
+  forAll (arbitrary @Test1) $ \x ->
+    x === toRecord (read (show $ fromRecord x))
 
 testDistribute :: Assertion
 testDistribute = do
