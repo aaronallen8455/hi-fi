@@ -19,6 +19,8 @@ module HiFi.Internal.Types
   ) where
 
 import           Control.DeepSeq (NFData(..))
+import           Control.Monad (void, when)
+import           Control.Monad.ST (ST)
 import           Data.Kind
 import qualified Data.List as List
 import qualified Data.Primitive.Array as A
@@ -43,14 +45,15 @@ type RecArray = A.Array Exts.Any
 --------------------------------------------------------------------------------
 
 instance FoldFields Semigroup rec f => Semigroup (HKD rec f) where
-  a <> b =
-    let go :: forall a. Semigroup (f a) => String -> (HKD rec f -> f a) -> f Exts.Any
-        go _ getter =
-          unsafeCoerce $ getter a <> getter b
-        -- TODO would be more efficient to not construct the intermediate list
-        fields =
-          foldFields @Semigroup @rec @f go [] (:)
-     in UnsafeMkHKD $ A.arrayFromList fields
+  a@(UnsafeMkHKD arr) <> b =
+    let builder :: forall s. A.MutableArray s (f Exts.Any) -> ST s ()
+        builder newArr = do
+          let go :: forall a. Semigroup (f a) => String -> (HKD rec f -> f a) -> Int -> ST s Int
+              go _ getter !idx = do
+                A.writeArray newArr idx . unsafeCoerce $ getter a <> getter b
+                pure $ idx - 1
+          void $ foldFields @Semigroup @rec @f go (pure (A.sizeofArray arr - 1)) (=<<)
+     in UnsafeMkHKD $ A.createArray (A.sizeofArray arr) (error "Semigroup: impossible") builder
 
 instance (FoldFields Semigroup rec f, FoldFields Monoid rec f) => Monoid (HKD rec f) where
   mempty =
@@ -75,22 +78,23 @@ instance FoldFields Show rec f => Show (HKD rec f) where
 
 instance FoldFields Read rec f => Read (HKD rec f) where
   readPrec = do
-    let go :: forall a. Read (f a) => String -> (HKD rec f -> f a) -> ReadPrec.ReadPrec (f Exts.Any)
-        go fieldName _ = do
+    let go :: forall a. Read (f a) => String -> (HKD rec f -> f a) -> Bool -> ReadPrec.ReadPrec (f Exts.Any)
+        go fieldName _ checkComma = do
           ReadPrec.lift $ do
-            _ <- ReadP.string fieldName
-            ReadP.skipSpaces
-            _ <- ReadP.char '='
-            ReadP.skipSpaces
+            ReadP.string fieldName *> ReadP.skipSpaces
+            ReadP.char '=' *> ReadP.skipSpaces
           x <- readPrec @(f a)
           ReadPrec.lift $ do
             ReadP.skipSpaces
-            ReadP.optional $ ReadP.char ','
-            ReadP.skipSpaces
+            when checkComma $ ReadP.char ',' *> ReadP.skipSpaces
           pure $ unsafeCoerce x
-    ReadPrec.lift $ ReadP.string "HKD {" >> ReadP.skipSpaces
-    fields <- sequence $ foldFields @Read @rec @f go [] (:)
-    _ <- ReadPrec.lift $ ReadP.char '}'
+    ReadPrec.lift $ ReadP.string "HKD {" *> ReadP.skipSpaces
+    fields <- sequence . fst
+            $ foldFields @Read @rec @f
+                go
+                ([], False)
+                (\x (acc, b) -> (x b : acc, True))
+    ReadPrec.lift $ ReadP.char '}' *> ReadP.eof
     pure . UnsafeMkHKD $ A.fromList fields
 
 instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
