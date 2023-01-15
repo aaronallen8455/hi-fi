@@ -17,13 +17,18 @@ toFieldName _ = MkFieldName
 allowedChar :: Char -> Bool
 allowedChar c =
   let i = ord c
-   in (i >= 97 && i <= 122)
-   || (i >= 65 && i <= 90)
-   || i == 95
-   || i == 39
-   || (i >= 48 && i <= 57)
+   in (i >= 97 && i <= 122) -- lowercase letters
+   || (i >= 65 && i <= 90) -- uppercase letters
+   || i == 95 -- underscore
+   || i == 39 -- apostrophe
+   || (i >= 48 && i <= 57) -- digits
 
 type StringSing :: Symbol -> Type
+-- | Singleton for type level strings. This allows the parse result plugin to
+-- generate a value whose type reflects a field name, so that the DataKinds
+-- extension is not required. Only the subset of common characters is
+-- represented and if any other character appears in a field name then
+-- DataKinds will be necessary.
 data StringSing str where
   SSA :: StringSing str -> StringSing (ConsSymbol 'A' str)
   SSB :: StringSing str -> StringSing (ConsSymbol 'B' str)

@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module HiFi.Api
-  ( mapEffect
+  ( hkdMap
   , hkdSequenceShallow
   , hkdSequence
   , hkdDistribute
@@ -37,8 +37,8 @@ import           HiFi.StringSing (StringSing(..), toFieldName)
 -- API
 --------------------------------------------------------------------------------
 
-mapEffect :: (forall a. f a -> g a) -> HKD rec f -> HKD rec g
-mapEffect f (UnsafeMkHKD arr) = UnsafeMkHKD $ f <$> arr
+hkdMap :: (forall a. f a -> g a) -> HKD rec f -> HKD rec g
+hkdMap f (UnsafeMkHKD arr) = UnsafeMkHKD $ f <$> arr
 
 hkdSequenceShallow :: forall f g rec. Applicative f
                    => HKD rec (Compose f g) -> f (HKD rec g)
@@ -47,7 +47,7 @@ hkdSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse coerce arr
 hkdSequence :: forall f rec. (Applicative f, ToRecord rec) => HKD rec f -> f rec
 hkdSequence = fmap toRecord
             . hkdSequenceShallow @f @Identity
-            . mapEffect (coerce . fmap Identity)
+            . hkdMap (coerce . fmap Identity)
 
 hkdDistribute :: forall rec f. (FieldGetters rec, Functor f)
               => f rec -> HKD rec f
@@ -71,14 +71,14 @@ hkdTraverse
   => (forall a. f a -> t (g a))
   -> HKD rec f
   -> t (HKD rec g)
-hkdTraverse f = hkdSequenceShallow . mapEffect (coerce . f)
+hkdTraverse f = hkdSequenceShallow . hkdMap (coerce . f)
 
 hkdCotraverse
   :: (Functor f, Functor t, FieldGetters rec)
   => (forall a. t (f a) -> g a)
   -> t (HKD rec f)
   -> HKD rec g
-hkdCotraverse f = mapEffect (f . getCompose) . hkdDistributeShallow
+hkdCotraverse f = hkdMap (f . getCompose) . hkdDistributeShallow
 
 hkdZipWith
   :: (forall a. f a -> g a -> h a)
@@ -90,7 +90,7 @@ hkdZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ d
   [ f (A.indexArray a i) (A.indexArray b i) ]
 
 hkdPure :: (Applicative f, FieldGetters rec) => rec -> HKD rec f
-hkdPure = mapEffect (pure . coerce) . fromRecord
+hkdPure = hkdMap (pure . coerce) . fromRecord
 
 toRecord :: ToRecord rec => HKD rec Identity -> rec
 toRecord (UnsafeMkHKD arr) = toRecord' $ coerce arr

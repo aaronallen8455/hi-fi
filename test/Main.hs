@@ -38,6 +38,7 @@ tests = testGroup "tests"
   , testProperty "Eq" testEq
   , testProperty "Ord" testOrd
   , testProperty "Show / Read" testShowRead
+  , testProperty "Show / Read single field" testShowReadSingle
   , testCase "distribute" testDistribute
   , testCase "hkd distribute" testHkdDistribute
   ]
@@ -392,7 +393,7 @@ testLargeRecord = do
 
 testEffectMap :: Assertion
 testEffectMap = do
-  let hkd = mapEffect (Just . runIdentity) $ fromRecord testInput1
+  let hkd = hkdMap (Just . runIdentity) $ fromRecord testInput1
   Just testInput1 @=? hkdSequence hkd
 
 testZipping :: Assertion
@@ -428,6 +429,11 @@ testOrd =
 testShowRead :: Property
 testShowRead =
   forAll (arbitrary @Test1) $ \x ->
+    x === toRecord (read (show $ fromRecord x))
+
+testShowReadSingle :: Property
+testShowReadSingle =
+  forAll (arbitrary @Test5) $ \x ->
     x === toRecord (read (show $ fromRecord x))
 
 testDistribute :: Assertion
@@ -712,6 +718,11 @@ data Test4 = Test4
   , t4199 :: Int
   , t4200 :: Int
   }
+
+data Test5 = Test5 { t51 :: Int } deriving (Show, Eq)
+
+instance Arbitrary Test5 where
+  arbitrary = hkdSequence mkHKD { t51 = arbitrary }
 
 instance IsString UnicodeString where
   fromString = UnicodeString

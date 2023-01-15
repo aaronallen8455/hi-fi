@@ -21,7 +21,7 @@ main = defaultMain
     , bench "getter (higgledy)" $ whnf (\x -> x ^. Hig.field @"t200") (fromRecordHiggledy testRec)
     , bench "setter (hi-fi)" $ whnf (setField @"t200" 5) (fromRecord testRec)
     , bench "setter (higgledy)" $ whnf (Hig.field @"t200" .~ 5) (fromRecordHiggledy testRec)
-    , bench "map effect (hi-fi)" $ whnf (mapEffect (Just . runIdentity)) (fromRecord testRec)
+    , bench "map effect (hi-fi)" $ whnf (hkdMap (Just . runIdentity)) (fromRecord testRec)
     , bench "map effect (higgledy)" $ whnf (Hig.bmap (Just . runIdentity)) (fromRecordHiggledy testRec)
     ]
   ]
