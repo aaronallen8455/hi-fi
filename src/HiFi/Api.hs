@@ -21,7 +21,6 @@ module HiFi.Api
   , toFieldName
   ) where
 
-import           Control.Monad.ST
 import           Data.Coerce (coerce)
 import           Data.Functor.Compose (Compose(..))
 import           Data.Functor.Identity (Identity(..))
@@ -30,7 +29,7 @@ import           GHC.Records
 import           GHC.TypeLits
 import           Unsafe.Coerce (unsafeCoerce)
 
-import           HiFi.Internal.Types (FieldGetters(..), HKD(..), IndexOfField(..), Instantiate(..), ToRecord(..))
+import           HiFi.Internal.Types (FieldGetters(..), FieldTy, HKD(..), HkdSetField(..), Instantiate(..), ToRecord(..), HkdHasField, HkdSetField)
 import           HiFi.StringSing (StringSing(..), toFieldName)
 
 --------------------------------------------------------------------------------
@@ -112,14 +111,11 @@ mkHKD = instantiate @rec @f @tuple
 
 setField
   :: forall name rec a f
-   . (HasField name rec a, IndexOfField name rec)
-  => f a
+   . (HasField name rec a, HkdSetField name rec f a)
+  => FieldTy f a
   -> HKD rec f
   -> HKD rec f
-setField val (UnsafeMkHKD arr) = UnsafeMkHKD $ runST $ do
-  marr <- A.unsafeThawArray arr
-  A.writeArray marr (indexOfField @name @rec) (unsafeCoerce val)
-  A.unsafeFreezeArray marr
+setField = hkdSetField @name @rec @f @a
 
 -- | Instantiate a HKD using the same value for every field.
 fill :: forall rec f. FieldGetters rec => (forall a. f a) -> HKD rec f
@@ -127,8 +123,12 @@ fill x = UnsafeMkHKD . A.arrayFromList $ unsafeCoerce x <$ fieldGetters @rec
 
 -- | A lens focusing a specific field in a HKD.
 atField :: forall (name :: Symbol) rec effect f a
-         . (HasField name rec a, IndexOfField name rec, Functor f)
-        => (effect a -> f (effect a))
+         . ( HasField name rec a
+           , Functor f
+           , HkdHasField name rec effect a
+           , HkdSetField name rec effect a
+           )
+        => (FieldTy effect a -> f (FieldTy effect a))
         -> HKD rec effect -> f (HKD rec effect)
 atField afa rec =
   flip (setField @name) rec <$> afa (getField @name rec)

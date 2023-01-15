@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -6,16 +7,20 @@ module HiFi.Internal.Types
   ( HKD(..)
   , RecArray
   , FieldName(..)
-  , IndexOfField(..)
   , FieldGetters(..)
+  , HkdHasField(..)
+  , HkdSetField(..)
   , Instantiate(..)
   , ToRecord(..)
   , FoldFields(..)
   , MissingField
   , UnknownField
   , indexArray
+  , innerRec
   , arrayFromList
   , unsafeCoerceF
+  , NestHKD(..)
+  , FieldTy
   ) where
 
 import           Control.DeepSeq (NFData(..))
@@ -39,6 +44,17 @@ newtype HKD rec f =
 data FieldName (symbol :: Symbol) = MkFieldName
 
 type RecArray = A.Array Exts.Any
+
+--------------------------------------------------------------------------------
+-- Record Nesting
+--------------------------------------------------------------------------------
+
+newtype NestHKD a = MkNestHKD { unNestHKD :: a }
+
+type FieldTy :: (Type -> Type) -> Type -> Type
+type family FieldTy f a where
+  FieldTy f (NestHKD a) = HKD a f
+  FieldTy f a = f a
 
 --------------------------------------------------------------------------------
 -- Instances
@@ -109,18 +125,19 @@ instance FoldFields NFData rec f => NFData (HKD rec f) where
         go _ getter = rnf (getter hkd)
      in foldFields @NFData @rec @f go () (\() () -> ())
 
-instance (HasField (name :: Symbol) rec a, IndexOfField name rec)
-    => HasField name (HKD rec f) (f a) where
-  getField (UnsafeMkHKD arr) =
-    unsafeCoerce $ A.indexArray arr (indexOfField @name @rec)
+instance (HasField (name :: Symbol) rec a, HkdHasField name rec f a, result ~ FieldTy f a)
+    => HasField name (HKD rec f) result where
+  getField = hkdGetField @name @rec @f @a
 
 --------------------------------------------------------------------------------
 -- Magic type classes
 --------------------------------------------------------------------------------
 
-type IndexOfField :: Symbol -> Type -> Constraint
-class IndexOfField name rec where
-  indexOfField :: Int
+class HasField name rec a => HkdHasField name rec f a where
+  hkdGetField :: HKD rec f -> FieldTy f a
+
+class HasField name rec a => HkdSetField name rec f a where
+  hkdSetField :: FieldTy f a -> HKD rec f -> HKD rec f
 
 class FieldGetters rec where
   fieldGetters :: [rec -> Exts.Any]
@@ -147,7 +164,7 @@ type FieldTypeCheck :: Symbol -> (Type -> Type) -> Type -> Type -> Constraint
 class FieldTypeCheck fieldName f recordTy userTy
 
 -- This equality constraint helps resolve ambiguous terms such as literals and Nothing.
-instance (f a ~ b) => FieldTypeCheck fieldName f a b
+instance (FieldTy f a ~ b) => FieldTypeCheck fieldName f a b
 
 type MissingField :: Symbol -> Type -> Constraint
 class MissingField fieldName rec
@@ -169,6 +186,15 @@ instance
 
 indexArray :: forall (rec :: Type) (f :: Type -> Type). HKD rec f -> Int -> f Exts.Any
 indexArray (UnsafeMkHKD arr) = A.indexArray arr
+
+innerRec
+  :: forall (rec :: Type) (f :: Type -> Type) (innerRec :: Type)
+   . HKD rec f
+  -> Int
+  -> Int
+  -> HKD innerRec f
+innerRec (UnsafeMkHKD arr) offset len =
+  UnsafeMkHKD (A.cloneArray arr offset len)
 
 arrayFromList :: forall rec (f :: Type -> Type). [f Exts.Any] -> HKD rec f
 arrayFromList = UnsafeMkHKD . A.arrayFromList
