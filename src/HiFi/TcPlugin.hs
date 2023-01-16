@@ -148,9 +148,8 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , tupleTy
            ] <- cc_tyargs
          , Just fields <- recordFields <$> getRecordFields inp recTy -> do
-             let fieldNamesTys = fmap fieldType <$> fields
              (tuplePairs, instantiateExpr)
-               <- gatherTupleFieldsAndBuildExpr inp fieldNamesTys recTy tupleTy effectCon
+               <- gatherTupleFieldsAndBuildExpr inp fields recTy tupleTy effectCon
              let recordFieldMap = Ghc.listToUFM
                                 $ (\(label, parts) -> (label, (label, fieldType parts)))
                               <$> fields
@@ -435,12 +434,12 @@ getFieldMatchResults recordFieldMap tuplePairs = do
 
 gatherTupleFieldsAndBuildExpr
   :: PluginInputs
-  -> [(Ghc.FastString, Ghc.Type)] -- field names and tyeps in order
+  -> [(Ghc.FastString, FieldParts)] -- field names and tyeps in order
   -> Ghc.Type -- record type
   -> Ghc.Type -- tuple
   -> Ghc.Type -- effect constructor
   -> Ghc.TcPluginM ([(Ghc.FastString, Ghc.Type)], Ghc.CoreExpr)
-gatherTupleFieldsAndBuildExpr MkPluginInputs{..} fieldNamesTys recTy tupleTy effectConTy = do
+gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNamesTys recTy tupleTy effectConTy = do
     tupleName <- Ghc.unsafeTcPluginTcM
                $ Ghc.newName (Ghc.mkOccName Ghc.varName "tuple")
     let tupleBind = Ghc.mkLocalIdOrCoVar tupleName Ghc.Many tupleTy
@@ -455,6 +454,7 @@ gatherTupleFieldsAndBuildExpr MkPluginInputs{..} fieldNamesTys recTy tupleTy eff
           fieldVarName
             <- Ghc.unsafeTcPluginTcM
              $ Ghc.newName (Ghc.mkOccName Ghc.varName "field")
+          -- This is variable that the RHS value is bound to
           let fieldVarId = Ghc.mkLocalIdOrCoVar fieldVarName Ghc.Many fieldTy
 
           fieldPairName
@@ -511,13 +511,17 @@ gatherTupleFieldsAndBuildExpr MkPluginInputs{..} fieldNamesTys recTy tupleTy eff
           let idsMap = Ghc.listToUFM (map (fmap fst) ids)
               fieldExprsInOrder :: [Ghc.CoreExpr]
               fieldExprsInOrder = do
-                (label, fieldTy) <- fieldNamesTys
+                (label, fieldParts) <- fieldNamesTys
                 Just fieldId <- [Ghc.lookupUFM idsMap label] -- actual field validation is done elsewhere
-                [Ghc.mkCoreApps (Ghc.Var unsafeCoerceFId)
-                                [ Ghc.Type effectConTy
-                                , Ghc.Type fieldTy
-                                , Ghc.Var fieldId
-                                ]]
+                case fieldNesting fieldParts of
+                  Unnested _ ->
+                    [Ghc.mkCoreApps (Ghc.Var unsafeCoerceFId)
+                                    [ Ghc.Type effectConTy
+                                    , Ghc.Type $ fieldType fieldParts
+                                    , Ghc.Var fieldId
+                                    ]]
+                  Nested _ len nestRecTy _ ->
+                    destructHKD inp nestRecTy effectConTy fieldId len
               fieldListExpr =
                 Ghc.mkListExpr
                   (Ghc.mkAppTys effectConTy [Ghc.anyTypeOfKind Ghc.liftedTypeKind])
@@ -529,6 +533,23 @@ gatherTupleFieldsAndBuildExpr MkPluginInputs{..} fieldNamesTys recTy tupleTy eff
           pure (map (fmap snd) ids, arrExpr)
 
       _ -> fail "garbage input to 'gatherTupleFieldsAndBuildExpr'"
+
+-- Given a variable for an HKD, produce exprs for each element in its array
+destructHKD
+  :: PluginInputs
+  -> Ghc.Type
+  -> Ghc.Type
+  -> Ghc.Var
+  -> Integer
+  -> [Ghc.CoreExpr]
+destructHKD inputs recTy effectTy hkdVar arrSize = do
+  ix <- [0..arrSize - 1]
+  pure $ Ghc.mkCoreApps (Ghc.Var $ indexArrayId inputs)
+    [ Ghc.Type recTy
+    , Ghc.Type effectTy
+    , Ghc.Var hkdVar
+    , Ghc.mkUncheckedIntExpr ix
+    ]
 
 buildFoldFieldsExpr
   :: PluginInputs
