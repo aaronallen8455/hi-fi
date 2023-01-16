@@ -7,9 +7,9 @@ module HiFi.TcPlugin
   ( tcPlugin
   ) where
 
+import           Control.Applicative (ZipList(..))
 import           Control.Monad
 import           Control.Monad.Trans.State.Strict (StateT(..), evalStateT)
-import           Data.Bifunctor (bimap)
 import           Data.Either (partitionEithers)
 import           Data.Functor ((<&>))
 import qualified Data.List as List
@@ -102,7 +102,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- FieldGetters
       if | clsName == fieldGettersName
          , [ recordTy ] <- cc_tyargs
-         , Just fields <- map (snd . snd) . recordFields
+         , Just fields <- map (fieldSelName . snd) . recordFields
                       <$> getRecordFields inp recordTy
          -> do
              selVars <- map Ghc.Var <$> traverse Ghc.tcLookupId fields
@@ -119,11 +119,9 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                           $ Ghc.newName (Ghc.mkOccName Ghc.varName "arr")
 
              let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.Many arrType
-
-             pure $ do
-               expr <- mkToRecordExpr inp recordTy recordParts arrBind 0
-               let result = Ghc.mkCoreLams [arrBind] expr
-               Just (Just (Ghc.EvExpr result), [], ct)
+                 expr = mkToRecordExpr inp recordTy recordParts arrBind 0
+                 result = Ghc.mkCoreLams [arrBind] expr
+             pure $ Just (Just (Ghc.EvExpr result), [], ct)
 
          -- FoldFields
          | clsName == foldFieldsName
@@ -138,7 +136,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                     recordTy
                     effectConTy
                     predClass
-                    (map (bimap fst fst) fields)
+                    (map (fmap fieldType) fields)
              pure $ case result of
                Left newWanteds -> Just (Nothing, newWanteds, ct)
                Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
@@ -150,11 +148,11 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , tupleTy
            ] <- cc_tyargs
          , Just fields <- recordFields <$> getRecordFields inp recTy -> do
-             let fieldNamesTys = bimap fst fst <$> fields
+             let fieldNamesTys = fmap fieldType <$> fields
              (tuplePairs, instantiateExpr)
                <- gatherTupleFieldsAndBuildExpr inp fieldNamesTys recTy tupleTy effectCon
              let recordFieldMap = Ghc.listToUFM
-                                $ (\((label, _), t) -> (label, (label, fst t)))
+                                $ (\(label, parts) -> (label, (label, fieldType parts)))
                               <$> fields
              newWanteds <-
                mkFieldTypeCheckWanteds
@@ -174,7 +172,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , _fieldTy -- TODO do a coerce with this?
            ] <- cc_tyargs
          , Just fields <- recordFields <$> getRecordFields inp recTy
-         , let namesToIndexes = fst <$> fields
+         , let namesToIndexes = fmap fieldNesting <$> fields
          , Just idx <- lookup fieldName namesToIndexes -> do
              hkdName <- Ghc.unsafeTcPluginTcM
                       $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
@@ -183,14 +181,14 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                  getterExpr =
                    Ghc.mkCoreLams [hkdBndr] $
                      case idx of
-                       Left ix ->
+                       Unnested ix ->
                          Ghc.mkCoreApps (Ghc.Var indexArrayId)
                                         [ Ghc.Type recTy
                                         , Ghc.Type effectTy
                                         , Ghc.Var hkdBndr
                                         , Ghc.mkUncheckedIntExpr ix
                                         ]
-                       Right (offset, len, innerRecTy) ->
+                       Nested offset len innerRecTy _ ->
                          Ghc.mkCoreApps (Ghc.Var getInnerRecId)
                                         [ Ghc.Type recTy
                                         , Ghc.Type effectTy
@@ -209,7 +207,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , fieldTy
            ] <- cc_tyargs
          , Just fields <- recordFields <$> getRecordFields inp recTy
-         , let namesToIndexes = fst <$> fields
+         , let namesToIndexes = fmap fieldNesting <$> fields
          , Just idx <- lookup fieldName namesToIndexes -> do
              hkdName <- Ghc.unsafeTcPluginTcM
                       $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
@@ -220,7 +218,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
              getterExpr <- do
                apps <-
                  case idx of
-                   Left ix ->
+                   Unnested ix ->
                      let elTy = Ghc.mkAppTys effectTy [Ghc.anyTypeOfKind Ghc.liftedTypeKind]
                          elBndr = Ghc.mkLocalIdOrCoVar elName Ghc.Many elTy
                       in pure $ Ghc.mkCoreApps (Ghc.Var writeArrayId)
@@ -231,7 +229,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                                   , Ghc.mkUncheckedIntExpr ix
                                   , Ghc.Var elBndr
                                   ]
-                   Right (offset, len, innerRecTy) -> do
+                   Nested offset len innerRecTy _ -> do
                      innerRecName <- Ghc.unsafeTcPluginTcM
                                    $ Ghc.newName (Ghc.mkOccName Ghc.varName "innerRec")
                      let -- innerRecTy = Ghc.mkTyConApp hkdTyCon [innerRecTy, effectTy]
@@ -271,12 +269,24 @@ getStrTyLitVal = \case
   _ -> Nothing
 
 data RecordParts = RecordParts
-  { recordCon :: Ghc.DataCon
-  , recordTyArgs :: [Ghc.Type]
-  , recordFields :: [( (Ghc.FastString, Either Integer (Integer, Integer, Ghc.Type))
-                     , (Ghc.Type, Ghc.Name)
-                     )]
+  { recordCon :: !Ghc.DataCon
+  , recordTyArgs :: ![Ghc.Type]
+  , recordFields :: ![(Ghc.FastString, FieldParts)]
   }
+
+data FieldParts = FieldParts
+  { fieldSelName :: !Ghc.Name
+  , fieldType :: !Ghc.Type
+  , fieldNesting :: !FieldNesting
+  }
+
+data FieldNesting
+  = Unnested !Integer
+  | Nested
+      !Integer -- offset
+      !Integer -- length
+      !Ghc.Type -- record ty
+      !RecordParts
 
 getRecordFields :: PluginInputs -> Ghc.Type -> Maybe RecordParts
 getRecordFields inputs = \case
@@ -291,18 +301,19 @@ getRecordFields inputs = \case
       let fieldTys = Ghc.scaledThing <$> Ghc.dataConInstOrigArgTys dataCon args
           fieldLabels = Ghc.flLabel <$> Ghc.dataConFieldLabels dataCon
           fieldSelectors = Ghc.flSelector <$> Ghc.dataConFieldLabels dataCon
-      fieldIndexes <-
-        let go :: Ghc.Type -> StateT Integer Maybe (Either Integer (Integer, Integer, Ghc.Type))
+      fieldNestings <-
+        let go :: Ghc.Type -> StateT Integer Maybe FieldNesting
             go ty = StateT $ \ !ix ->
               case Ghc.tcSplitTyConApp_maybe ty of
                 Just (con, [innerRecTy]) | Ghc.getName con == nestedHkdName inputs -> do
-                  ((_, inner), _) <- getLast . foldMap (Last . Just) . recordFields
-                             =<< getRecordFields inputs innerRecTy
-                  let len = case inner of
-                              Left i -> i + 1
-                              Right (i, l, _) -> i + l
-                  Just (Right (ix, len, innerRecTy), ix + len)
-                _ -> pure (Left ix, ix + 1)
+                  innerRecParts <- getRecordFields inputs innerRecTy
+                  (_, lastFieldParts) <-
+                    getLast . foldMap (Last . Just) $ recordFields innerRecParts
+                  let len = case fieldNesting lastFieldParts of
+                              Unnested i -> i + 1
+                              Nested i l _ _ -> i + l
+                  Just (Nested ix len innerRecTy innerRecParts, ix + len)
+                _ -> pure (Unnested ix, ix + 1)
          in evalStateT (traverse go fieldTys) 0
       guard . not $ null fieldTys
       guard $ length fieldTys == length fieldLabels
@@ -310,8 +321,12 @@ getRecordFields inputs = \case
       Just RecordParts
         { recordCon = dataCon
         , recordTyArgs = args
-        , recordFields = zip (zip fieldLabels fieldIndexes)
-                       $ zip fieldTys fieldSelectors
+        , recordFields = zip fieldLabels
+                       . getZipList
+                       $ FieldParts
+                           <$> ZipList fieldSelectors
+                           <*> ZipList fieldTys
+                           <*> ZipList fieldNestings
         }
   _ -> Nothing
 
@@ -321,18 +336,17 @@ mkToRecordExpr
   -> RecordParts
   -> Ghc.Var
   -> Integer
-  -> Maybe Ghc.CoreExpr
-mkToRecordExpr inputs@MkPluginInputs{..} recordTy recordParts arrBind !ixOffset = do
-  let mkFieldVal ((_, ix), _) = case ix of
-        Left n -> Just $
+  -> Ghc.CoreExpr
+mkToRecordExpr inputs@MkPluginInputs{..} recordTy recordParts arrBind !ixOffset =
+  let mkFieldVal (_, fieldParts) = case fieldNesting fieldParts of
+        Unnested n ->
           Ghc.mkCoreApps (Ghc.Var indexArrayId)
             [ Ghc.Type recordTy
             , Ghc.Type $ Ghc.tyConNullaryTy identityTyCon
             , Ghc.Var arrBind
             , Ghc.mkUncheckedIntExpr $! n + ixOffset
             ]
-        Right (offset, _, innerRecTy) -> do
-          innerRecParts <- getRecordFields inputs innerRecTy
+        Nested offset _ innerRecTy innerRecParts ->
           mkToRecordExpr
             inputs
             innerRecTy
@@ -340,10 +354,10 @@ mkToRecordExpr inputs@MkPluginInputs{..} recordTy recordParts arrBind !ixOffset 
             arrBind
             (ixOffset + offset)
 
-  fieldVals <- traverse mkFieldVal (recordFields recordParts)
+      fieldVals = mkFieldVal <$> recordFields recordParts
 
-  Just . Ghc.mkCoreConApps (recordCon recordParts)
-       $ (Ghc.Type <$> recordTyArgs recordParts) ++ fieldVals
+   in Ghc.mkCoreConApps (recordCon recordParts)
+      $ (Ghc.Type <$> recordTyArgs recordParts) ++ fieldVals
 
 data LabelMatchResult
   = Match Ghc.FastString Ghc.Type Ghc.Type
