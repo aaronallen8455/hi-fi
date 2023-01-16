@@ -102,12 +102,12 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- FieldGetters
       if | clsName == fieldGettersName
          , [ recordTy ] <- cc_tyargs
-         , Just fields <- map (fieldSelName . snd) . recordFields
+         , Just fields <- map snd . recordFields
                       <$> getRecordFields inp recordTy
          -> do
-             selVars <- map Ghc.Var <$> traverse Ghc.tcLookupId fields
+             exprs <- concat <$> traverse (mkFieldGetters recordTy) fields
              let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
-             pure $ Just (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy selVars), [], ct)
+             pure $ Just (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy exprs), [], ct)
 
          -- ToRecord
          | clsName == toRecordName
@@ -328,6 +328,32 @@ getRecordFields inputs = \case
                            <*> ZipList fieldNestings
         }
   _ -> Nothing
+
+mkFieldGetters
+  :: Ghc.Type
+  -> FieldParts
+  -> Ghc.TcPluginM [Ghc.CoreExpr]
+mkFieldGetters recTy fp = traverse buildExpr =<< collectSels fp
+  where
+    collectSels :: FieldParts -> Ghc.TcPluginM [[Ghc.CoreExpr]]
+    collectSels fieldParts = do
+      selId <- Ghc.tcLookupId $ fieldSelName fieldParts
+      case fieldNesting fieldParts of
+        Unnested{} -> pure [[Ghc.Var selId]]
+        Nested _ _ _ recParts
+          -> fmap (map (Ghc.Var selId :) . concat)
+           . traverse (collectSels . snd)
+           $ recordFields recParts
+
+    buildExpr :: [Ghc.CoreExpr] -> Ghc.TcPluginM Ghc.CoreExpr
+    buildExpr [selector] = pure selector
+    buildExpr selectors = do
+      recName <- Ghc.unsafeTcPluginTcM
+               $ Ghc.newName (Ghc.mkOccName Ghc.varName "rec")
+      let recBind = Ghc.mkLocalIdOrCoVar recName Ghc.Many recTy
+          go acc selector = Ghc.mkCoreApps selector [acc]
+          expr = List.foldl' go (Ghc.Var recBind) selectors
+      pure $ Ghc.mkCoreLams [recBind] expr
 
 mkToRecordExpr
   :: PluginInputs
