@@ -112,7 +112,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- ToRecord
          | clsName == toRecordName
          , [ recordTy ] <- cc_tyargs
-         , Just RecordParts{..} <- getRecordFields inp recordTy
+         , Just recordParts <- getRecordFields inp recordTy
          , Just arrType <- Ghc.synTyConRhs_maybe recArrayTyCon
          -> do
              arrBindName <- Ghc.unsafeTcPluginTcM
@@ -120,19 +120,10 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
 
              let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.Many arrType
 
-                 accessor ix =
-                   Ghc.mkCoreApps (Ghc.Var indexArrayId)
-                     [ Ghc.Type recordTy
-                     , Ghc.Type $ Ghc.tyConNullaryTy identityTyCon
-                     , Ghc.Var arrBind, Ghc.mkUncheckedIntExpr ix
-                     ]
-                 result =
-                   Ghc.mkCoreLams [arrBind] $
-                     Ghc.mkCoreConApps recordCon
-                       $ (Ghc.Type <$> recordTyArgs) ++ do
-                           (_, ix) <- recordFields `zip` [0..]
-                           [accessor ix]
-             pure $ Just (Just (Ghc.EvExpr result), [], ct)
+             pure $ do
+               expr <- mkToRecordExpr inp recordTy recordParts arrBind 0
+               let result = Ghc.mkCoreLams [arrBind] expr
+               Just (Just (Ghc.EvExpr result), [], ct)
 
          -- FoldFields
          | clsName == foldFieldsName
@@ -323,6 +314,36 @@ getRecordFields inputs = \case
                        $ zip fieldTys fieldSelectors
         }
   _ -> Nothing
+
+mkToRecordExpr
+  :: PluginInputs
+  -> Ghc.Type
+  -> RecordParts
+  -> Ghc.Var
+  -> Integer
+  -> Maybe Ghc.CoreExpr
+mkToRecordExpr inputs@MkPluginInputs{..} recordTy recordParts arrBind !ixOffset = do
+  let mkFieldVal ((_, ix), _) = case ix of
+        Left n -> Just $
+          Ghc.mkCoreApps (Ghc.Var indexArrayId)
+            [ Ghc.Type recordTy
+            , Ghc.Type $ Ghc.tyConNullaryTy identityTyCon
+            , Ghc.Var arrBind
+            , Ghc.mkUncheckedIntExpr $! n + ixOffset
+            ]
+        Right (offset, _, innerRecTy) -> do
+          innerRecParts <- getRecordFields inputs innerRecTy
+          mkToRecordExpr
+            inputs
+            innerRecTy
+            innerRecParts
+            arrBind
+            (ixOffset + offset)
+
+  fieldVals <- traverse mkFieldVal (recordFields recordParts)
+
+  Just . Ghc.mkCoreConApps (recordCon recordParts)
+       $ (Ghc.Type <$> recordTyArgs recordParts) ++ fieldVals
 
 data LabelMatchResult
   = Match Ghc.FastString Ghc.Type Ghc.Type
