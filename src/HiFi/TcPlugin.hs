@@ -8,11 +8,13 @@ module HiFi.TcPlugin
   ) where
 
 import           Control.Monad
-import           Control.Monad.Trans.State.Strict (StateT(..))
+import           Control.Monad.Trans.State.Strict (StateT(..), evalStateT)
+import           Data.Bifunctor (bimap)
 import           Data.Either (partitionEithers)
 import           Data.Functor ((<&>))
 import qualified Data.List as List
 import           Data.Maybe (catMaybes, maybeToList)
+import           Data.Monoid (Last(..))
 import           Data.Traversable (for)
 
 import qualified HiFi.GhcFacade as Ghc
@@ -29,8 +31,7 @@ tcPlugin = Ghc.TcPlugin
 
 data PluginInputs =
   MkPluginInputs
-    { indexOfFieldClass   :: !Ghc.Class
-    , fieldGettersName    :: !Ghc.Name
+    { fieldGettersName    :: !Ghc.Name
     , toRecordName        :: !Ghc.Name
     , foldFieldsName      :: !Ghc.Name
     , instantiateName     :: !Ghc.Name
@@ -47,6 +48,12 @@ data PluginInputs =
     , unknownFieldClass   :: !Ghc.Class
     , unsafeCoerceFId     :: !Ghc.Id
     , identityTyCon       :: !Ghc.TyCon
+    , hkdHasFieldClass    :: !Ghc.Class
+    , hkdSetFieldClass    :: !Ghc.Class
+    , nestedHkdName       :: !Ghc.Name
+    , getInnerRecId       :: !Ghc.Id
+    , setInnerRecId       :: !Ghc.Id
+    , writeArrayId        :: !Ghc.Id
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -61,7 +68,6 @@ lookupInputs = do
   hiFiMod <- findModule "HiFi.Internal.Types"
   identityMod <- findModule "Data.Functor.Identity"
 
-  indexOfFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "IndexOfField")
   fieldGettersName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldGetters")
   toRecordName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "ToRecord")
   foldFieldsName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FoldFields")
@@ -79,6 +85,12 @@ lookupInputs = do
   unknownFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "UnknownField")
   unsafeCoerceFId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "unsafeCoerceF")
   identityTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig identityMod (Ghc.mkTcOcc "Identity")
+  hkdHasFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HkdHasField")
+  hkdSetFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HkdSetField")
+  nestedHkdName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "NestedHKD")
+  getInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "getInnerRecId")
+  setInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "setInnerRecId")
+  writeArrayId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "writeArray")
   pure MkPluginInputs{..}
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
@@ -87,23 +99,11 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
     ct@Ghc.CDictCan{ cc_class, cc_tyargs } -> do
       let clsName = Ghc.getName cc_class
 
-         -- IndexOfField
-      if | clsName == Ghc.getName indexOfFieldClass
-         , [ getStrTyLitVal -> Just fieldName
-           , fmap (map fst . recordFields) . getRecordFields -> Just fields
-           ] <- cc_tyargs -> pure $ Just
-             ( do
-               ix <- List.elemIndex fieldName fields
-               let expr = Ghc.mkUncheckedIntExpr $ fromIntegral ix
-               Just $ Ghc.EvExpr expr
-             , []
-             , ct
-             )
-
          -- FieldGetters
-         | clsName == fieldGettersName
+      if | clsName == fieldGettersName
          , [ recordTy ] <- cc_tyargs
-         , Just fields <- map (snd . snd) . recordFields <$> getRecordFields recordTy
+         , Just fields <- map (snd . snd) . recordFields
+                      <$> getRecordFields inp recordTy
          -> do
              selVars <- map Ghc.Var <$> traverse Ghc.tcLookupId fields
              let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
@@ -112,7 +112,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- ToRecord
          | clsName == toRecordName
          , [ recordTy ] <- cc_tyargs
-         , Just RecordParts{..} <- getRecordFields recordTy
+         , Just RecordParts{..} <- getRecordFields inp recordTy
          , Just arrType <- Ghc.synTyConRhs_maybe recArrayTyCon
          -> do
              arrBindName <- Ghc.unsafeTcPluginTcM
@@ -138,7 +138,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          | clsName == foldFieldsName
          , [ predConTy, recordTy, effectConTy ] <- cc_tyargs
          , Just predTyCon <- Ghc.tyConAppTyCon_maybe predConTy
-         , Just fields <- recordFields <$> getRecordFields recordTy -> do
+         , Just fields <- recordFields <$> getRecordFields inp recordTy -> do
              predClass <- Ghc.tcLookupClass $ Ghc.getName predTyCon
              result
                <- buildFoldFieldsExpr
@@ -147,7 +147,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                     recordTy
                     effectConTy
                     predClass
-                    (map (fmap fst) fields)
+                    (map (bimap fst fst) fields)
              pure $ case result of
                Left newWanteds -> Just (Nothing, newWanteds, ct)
                Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
@@ -158,12 +158,12 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , effectCon
            , tupleTy
            ] <- cc_tyargs
-         , Just fields <- recordFields <$> getRecordFields recTy -> do
-             let fieldNamesTys = fmap fst <$> fields
+         , Just fields <- recordFields <$> getRecordFields inp recTy -> do
+             let fieldNamesTys = bimap fst fst <$> fields
              (tuplePairs, instantiateExpr)
                <- gatherTupleFieldsAndBuildExpr inp fieldNamesTys recTy tupleTy effectCon
              let recordFieldMap = Ghc.listToUFM
-                                $ (\(label, t) -> (label, (label, fst t)))
+                                $ (\((label, _), t) -> (label, (label, fst t)))
                               <$> fields
              newWanteds <-
                mkFieldTypeCheckWanteds
@@ -174,6 +174,88 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                  tuplePairs
                  effectCon
              pure $ Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
+
+         -- HkdHasField
+         | clsName == Ghc.getName hkdHasFieldClass
+         , [ getStrTyLitVal -> Just fieldName
+           , recTy
+           , effectTy
+           , _fieldTy -- TODO do a coerce with this?
+           ] <- cc_tyargs
+         , Just fields <- recordFields <$> getRecordFields inp recTy
+         , let namesToIndexes = fst <$> fields
+         , Just idx <- lookup fieldName namesToIndexes -> do
+             hkdName <- Ghc.unsafeTcPluginTcM
+                      $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
+             let hkdTy = Ghc.mkTyConApp hkdTyCon [recTy, effectTy]
+                 hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
+                 getterExpr =
+                   Ghc.mkCoreLams [hkdBndr] $
+                     case idx of
+                       Left ix ->
+                         Ghc.mkCoreApps (Ghc.Var indexArrayId)
+                                        [ Ghc.Type recTy
+                                        , Ghc.Type effectTy
+                                        , Ghc.Var hkdBndr
+                                        , Ghc.mkUncheckedIntExpr ix
+                                        ]
+                       Right (offset, len, innerRecTy) ->
+                         Ghc.mkCoreApps (Ghc.Var getInnerRecId)
+                                        [ Ghc.Type recTy
+                                        , Ghc.Type effectTy
+                                        , Ghc.Type innerRecTy
+                                        , Ghc.Var hkdBndr
+                                        , Ghc.mkUncheckedIntExpr offset
+                                        , Ghc.mkUncheckedIntExpr len
+                                        ]
+             pure $ Just (Just (Ghc.EvExpr getterExpr), [], ct)
+
+         -- HkdSetField
+         | clsName == Ghc.getName hkdSetFieldClass
+         , [ getStrTyLitVal -> Just fieldName
+           , recTy
+           , effectTy
+           , fieldTy
+           ] <- cc_tyargs
+         , Just fields <- recordFields <$> getRecordFields inp recTy
+         , let namesToIndexes = fst <$> fields
+         , Just idx <- lookup fieldName namesToIndexes -> do
+             hkdName <- Ghc.unsafeTcPluginTcM
+                      $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
+             elName <- Ghc.unsafeTcPluginTcM
+                     $ Ghc.newName (Ghc.mkOccName Ghc.varName "el")
+             let hkdTy = Ghc.mkTyConApp hkdTyCon [recTy, effectTy]
+                 hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
+             getterExpr <- do
+               apps <-
+                 case idx of
+                   Left ix ->
+                     let elTy = Ghc.mkAppTys effectTy [Ghc.anyTypeOfKind Ghc.liftedTypeKind]
+                         elBndr = Ghc.mkLocalIdOrCoVar elName Ghc.Many elTy
+                      in pure $ Ghc.mkCoreApps (Ghc.Var writeArrayId)
+                                  [ Ghc.Type recTy
+                                  , Ghc.Type effectTy
+                                  , Ghc.Type fieldTy
+                                  , Ghc.Var hkdBndr
+                                  , Ghc.mkUncheckedIntExpr ix
+                                  , Ghc.Var elBndr
+                                  ]
+                   Right (offset, len, innerRecTy) -> do
+                     innerRecName <- Ghc.unsafeTcPluginTcM
+                                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "innerRec")
+                     let -- innerRecTy = Ghc.mkTyConApp hkdTyCon [innerRecTy, effectTy]
+                         innerRecBndr = Ghc.mkLocalIdOrCoVar innerRecName Ghc.Many fieldTy
+                     pure $ Ghc.mkCoreApps (Ghc.Var setInnerRecId)
+                            [ Ghc.Type recTy
+                            , Ghc.Type effectTy
+                            , Ghc.Type innerRecTy
+                            , Ghc.Var hkdBndr
+                            , Ghc.mkUncheckedIntExpr offset
+                            , Ghc.mkUncheckedIntExpr len
+                            , Ghc.Var innerRecBndr
+                            ]
+               pure $ Ghc.mkCoreLams [hkdBndr] apps
+             pure $ Just (Just (Ghc.EvExpr getterExpr), [], ct)
 
          | otherwise -> pure Nothing
     _ -> pure Nothing
@@ -200,11 +282,13 @@ getStrTyLitVal = \case
 data RecordParts = RecordParts
   { recordCon :: Ghc.DataCon
   , recordTyArgs :: [Ghc.Type]
-  , recordFields :: [(Ghc.FastString, (Ghc.Type, Ghc.Name))]
+  , recordFields :: [( (Ghc.FastString, Either Integer (Integer, Integer, Ghc.Type))
+                     , (Ghc.Type, Ghc.Name)
+                     )]
   }
 
-getRecordFields :: Ghc.Type -> Maybe RecordParts
-getRecordFields = \case
+getRecordFields :: PluginInputs -> Ghc.Type -> Maybe RecordParts
+getRecordFields inputs = \case
   Ghc.TyConApp tyCon args
     | Ghc.isAlgTyCon tyCon
     , Ghc.DataTyCon{..} <- Ghc.algTyConRhs tyCon
@@ -216,13 +300,27 @@ getRecordFields = \case
       let fieldTys = Ghc.scaledThing <$> Ghc.dataConInstOrigArgTys dataCon args
           fieldLabels = Ghc.flLabel <$> Ghc.dataConFieldLabels dataCon
           fieldSelectors = Ghc.flSelector <$> Ghc.dataConFieldLabels dataCon
+      fieldIndexes <-
+        let go :: Ghc.Type -> StateT Integer Maybe (Either Integer (Integer, Integer, Ghc.Type))
+            go ty = StateT $ \ !ix ->
+              case Ghc.tcSplitTyConApp_maybe ty of
+                Just (con, [innerRecTy]) | Ghc.getName con == nestedHkdName inputs -> do
+                  ((_, inner), _) <- getLast . foldMap (Last . Just) . recordFields
+                             =<< getRecordFields inputs innerRecTy
+                  let len = case inner of
+                              Left i -> i + 1
+                              Right (i, l, _) -> i + l
+                  Just (Right (ix, len, innerRecTy), ix + len)
+                _ -> pure (Left ix, ix + 1)
+         in evalStateT (traverse go fieldTys) 0
       guard . not $ null fieldTys
       guard $ length fieldTys == length fieldLabels
       -- add a guard for equality of rep arity and source arity?
       Just RecordParts
         { recordCon = dataCon
         , recordTyArgs = args
-        , recordFields = zip fieldLabels $ zip fieldTys fieldSelectors
+        , recordFields = zip (zip fieldLabels fieldIndexes)
+                       $ zip fieldTys fieldSelectors
         }
   _ -> Nothing
 

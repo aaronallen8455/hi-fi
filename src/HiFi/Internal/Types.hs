@@ -16,7 +16,9 @@ module HiFi.Internal.Types
   , MissingField
   , UnknownField
   , indexArray
-  , innerRec
+  , writeArray
+  , getInnerRec
+  , setInnerRec
   , arrayFromList
   , unsafeCoerceF
   , NestHKD(..)
@@ -49,7 +51,8 @@ type RecArray = A.Array Exts.Any
 -- Record Nesting
 --------------------------------------------------------------------------------
 
-newtype NestHKD a = MkNestHKD { unNestHKD :: a }
+newtype NestHKD a = NestHKD { unNestHKD :: a }
+-- TODO derive all the things
 
 type FieldTy :: (Type -> Type) -> Type -> Type
 type family FieldTy f a where
@@ -187,14 +190,38 @@ instance
 indexArray :: forall (rec :: Type) (f :: Type -> Type). HKD rec f -> Int -> f Exts.Any
 indexArray (UnsafeMkHKD arr) = A.indexArray arr
 
-innerRec
+writeArray
+  :: forall (rec :: Type) (f :: Type -> Type) (a :: Type)
+   . HKD rec f
+  -> Int
+  -> f a
+  -> HKD rec f
+writeArray (UnsafeMkHKD arr) ix a = UnsafeMkHKD $ A.runArray $ do
+  arrM <- A.thawArray arr 0 (A.sizeofArray arr)
+  A.writeArray arrM ix (unsafeCoerce a)
+  pure arrM
+
+getInnerRec
   :: forall (rec :: Type) (f :: Type -> Type) (innerRec :: Type)
    . HKD rec f
   -> Int
   -> Int
   -> HKD innerRec f
-innerRec (UnsafeMkHKD arr) offset len =
+getInnerRec (UnsafeMkHKD arr) offset len =
   UnsafeMkHKD (A.cloneArray arr offset len)
+
+setInnerRec
+  :: forall (rec :: Type) (f :: Type -> Type) (innerRec :: Type)
+   . HKD rec f
+  -> Int
+  -> Int
+  -> HKD innerRec f
+  -> HKD rec f
+setInnerRec (UnsafeMkHKD arr) offset len (UnsafeMkHKD innerRec) =
+  UnsafeMkHKD $ A.runArray $ do
+    arrMut <- A.thawArray arr 0 (A.sizeofArray arr)
+    A.copyArray arrMut offset innerRec 0 len
+    pure arrMut
 
 arrayFromList :: forall rec (f :: Type -> Type). [f Exts.Any] -> HKD rec f
 arrayFromList = UnsafeMkHKD . A.arrayFromList
