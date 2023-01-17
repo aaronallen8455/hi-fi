@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -55,7 +55,7 @@ newtype NestHKD a = NestHKD { unNestHKD :: a }
 -- TODO derive all the things
 
 type FieldTy :: (Type -> Type) -> Type -> Type
-type family FieldTy f a where
+type family FieldTy f a = r | r -> f a where
   FieldTy f (NestHKD a) = HKD a f
   FieldTy f a = f a
 
@@ -67,7 +67,11 @@ instance FoldFields Semigroup rec f => Semigroup (HKD rec f) where
   a@(UnsafeMkHKD arr) <> b =
     let builder :: forall s. A.MutableArray s (f Exts.Any) -> ST s ()
         builder newArr = do
-          let go :: forall a. Semigroup (f a) => String -> (HKD rec f -> f a) -> Int -> ST s Int
+          let go :: forall a. Semigroup (FieldTy f a)
+                 => String
+                 -> (HKD rec f -> FieldTy f a)
+                 -> Int
+                 -> ST s Int
               go _ getter !idx = do
                 A.writeArray newArr idx . unsafeCoerce $ getter a <> getter b
                 pure $ idx - 1
@@ -76,33 +80,37 @@ instance FoldFields Semigroup rec f => Semigroup (HKD rec f) where
 
 instance (FoldFields Semigroup rec f, FoldFields Monoid rec f) => Monoid (HKD rec f) where
   mempty =
-    let go :: forall a. Monoid (f a) => String -> (HKD rec f -> f a) -> f Exts.Any
-        go _ _ = unsafeCoerce $ mempty @(f a)
+    let go :: forall a. Monoid (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> f Exts.Any
+        go _ _ = unsafeCoerce $ mempty @(FieldTy f a)
         fields =
           foldFields @Monoid @rec @f go [] (:)
      in UnsafeMkHKD $ A.arrayFromList fields
 
 instance FoldFields Eq rec f => Eq (HKD rec f) where
   a == b =
-    let go :: forall a. Eq (f a) => String -> (HKD rec f -> f a) -> Bool
+    let go :: forall a. Eq (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> Bool
         go _ getter = getter a == getter b
      in foldFields @Eq @rec @f go True (&&)
 
 instance FoldFields Show rec f => Show (HKD rec f) where
   show rec =
-    let go :: forall a. Show (f a) => String -> (HKD rec f -> f a) -> String
+    let go :: forall a. Show (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> String
         go fieldName getter =
           fieldName <> " = " <> show (getter rec)
      in "HKD {" <> List.intercalate ", " (foldFields @Show @rec @f go [] (:)) <> "}"
 
 instance FoldFields Read rec f => Read (HKD rec f) where
   readPrec = do
-    let go :: forall a. Read (f a) => String -> (HKD rec f -> f a) -> Bool -> ReadPrec.ReadPrec (f Exts.Any)
+    let go :: forall a. Read (FieldTy f a)
+           => String
+           -> (HKD rec f -> FieldTy f a)
+           -> Bool
+           -> ReadPrec.ReadPrec (f Exts.Any)
         go fieldName _ checkComma = do
           ReadPrec.lift $ do
             ReadP.string fieldName *> ReadP.skipSpaces
             ReadP.char '=' *> ReadP.skipSpaces
-          x <- readPrec @(f a)
+          x <- readPrec @(FieldTy f a)
           ReadPrec.lift $ do
             ReadP.skipSpaces
             when checkComma $ ReadP.char ',' *> ReadP.skipSpaces
@@ -118,13 +126,13 @@ instance FoldFields Read rec f => Read (HKD rec f) where
 
 instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
   compare a b =
-    let go :: forall a. Ord (f a) => String -> (HKD rec f -> f a) -> Ordering
+    let go :: forall a. Ord (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> Ordering
         go _ getter = compare (getter a) (getter b)
      in foldFields @Ord @rec @f go mempty (<>)
 
 instance FoldFields NFData rec f => NFData (HKD rec f) where
   rnf hkd =
-    let go :: forall a. NFData (f a) => String -> (HKD rec f -> f a) -> ()
+    let go :: forall a. NFData (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> ()
         go _ getter = rnf (getter hkd)
      in foldFields @NFData @rec @f go () (\() () -> ())
 
@@ -153,7 +161,7 @@ type FoldFields :: (Type -> Constraint) -> Type -> (Type -> Type) -> Constraint
 class FoldFields c rec f where
   foldFields :: forall acc x.
                 (forall a.
-                  c (f a) => String -> (HKD rec f -> f a) -> x
+                  c (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> x
                 )
              -> acc
              -> (x -> acc -> acc)

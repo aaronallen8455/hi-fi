@@ -54,6 +54,7 @@ data PluginInputs =
     , getInnerRecId       :: !Ghc.Id
     , setInnerRecId       :: !Ghc.Id
     , writeArrayId        :: !Ghc.Id
+    , fieldTyTyCon        :: !Ghc.TyCon
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -91,6 +92,7 @@ lookupInputs = do
   getInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "getInnerRecId")
   setInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "setInnerRecId")
   writeArrayId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "writeArray")
+  fieldTyTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldTy")
   pure MkPluginInputs{..}
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
@@ -136,7 +138,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                     recordTy
                     effectConTy
                     predClass
-                    (map (fmap fieldType) fields)
+                    fields
              pure $ case result of
                Left newWanteds -> Just (Nothing, newWanteds, ct)
                Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
@@ -329,6 +331,8 @@ getRecordFields inputs = \case
         }
   _ -> Nothing
 
+-- | Produce a list of accessor functions for each field in the HKD, including
+-- nested HKDs.
 mkFieldGetters
   :: Ghc.Type
   -> FieldParts
@@ -583,7 +587,7 @@ buildFoldFieldsExpr
   -> Ghc.Type
   -> Ghc.Type
   -> Ghc.Class
-  -> [(Ghc.FastString, Ghc.Type)]
+  -> [(Ghc.FastString, FieldParts)]
   -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
 buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fields = do
   accTyVarName <- Ghc.unsafeTcPluginTcM
@@ -612,13 +616,13 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
         where
           forallBndrs = [ Ghc.mkTyCoVarBinder Ghc.Required fieldTyVar ]
           preds = [ Ghc.mkClassPred predClass
-                      [Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]]
+                      [Ghc.mkTyConApp fieldTyTyCon [effectConTy, Ghc.mkTyVarTy fieldTyVar]]
                   ]
           tyBody = Ghc.stringTy
                  `Ghc.mkVisFunTyMany`
                    ( hkdTy
                    `Ghc.mkVisFunTyMany`
-                     Ghc.mkAppTys effectConTy [Ghc.mkTyVarTy fieldTyVar]
+                     Ghc.mkTyConApp fieldTyTyCon [effectConTy, Ghc.mkTyVarTy fieldTyVar]
                    )
                  `Ghc.mkVisFunTyMany`
                    Ghc.mkTyVarTy xTyVar
@@ -638,19 +642,31 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
       hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
 
   let mkFieldGenExpr
-        :: (Integer, (Ghc.FastString, Ghc.Type))
+        :: (Ghc.FastString, FieldParts)
         -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
-      mkFieldGenExpr (idx, (fieldName, fieldTy)) = do
+      mkFieldGenExpr (fieldName, fieldParts) = do
         fieldNameExpr <- Ghc.mkStringExprFS' fieldName
         let getterExpr =
               Ghc.mkCoreLams [hkdBndr] $
-                Ghc.mkCoreApps (Ghc.Var indexArrayId)
-                               [ Ghc.Type recordTy
-                               , Ghc.Type effectConTy
-                               , Ghc.Var hkdBndr
-                               , Ghc.mkUncheckedIntExpr idx
-                               ]
-            predClassArgs = [Ghc.mkAppTys effectConTy [fieldTy]]
+                case fieldNesting fieldParts of
+                  Unnested idx ->
+                    Ghc.mkCoreApps (Ghc.Var indexArrayId)
+                                   [ Ghc.Type recordTy
+                                   , Ghc.Type effectConTy
+                                   , Ghc.Var hkdBndr
+                                   , Ghc.mkUncheckedIntExpr idx
+                                   ]
+                  Nested offset len innerRecTy _ ->
+                    Ghc.mkCoreApps (Ghc.Var getInnerRecId)
+                                   [ Ghc.Type recordTy
+                                   , Ghc.Type effectConTy
+                                   , Ghc.Type innerRecTy
+                                   , Ghc.Var hkdBndr
+                                   , Ghc.mkUncheckedIntExpr offset
+                                   , Ghc.mkUncheckedIntExpr len
+                                   ]
+            predClassArgs =
+              [Ghc.mkTyConApp fieldTyTyCon [effectConTy, fieldType fieldParts]]
 
         predCt <- makeWantedCt ctLoc predClass predClassArgs
 
@@ -665,7 +681,7 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
 
         pure $ ePredDict <&> \predDict ->
           Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
-            [ Ghc.Type fieldTy
+            [ Ghc.Type $ fieldType fieldParts
             ] ++ [predDict] ++
             [ fieldNameExpr
             , getterExpr
@@ -678,7 +694,7 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
                 , accumulatorBndr
                 ]
 
-  result <- traverse mkFieldGenExpr (zip [0..] fields)
+  result <- traverse mkFieldGenExpr fields
   case partitionEithers result of
     ([], fieldGenExprs) -> do
       bodyExpr <- Ghc.unsafeTcPluginTcM $
