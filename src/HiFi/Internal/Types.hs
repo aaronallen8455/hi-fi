@@ -1,3 +1,5 @@
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE UndecidableSuperClasses #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
@@ -13,6 +15,8 @@ module HiFi.Internal.Types
   , Instantiate(..)
   , ToRecord(..)
   , FoldFields(..)
+  , ToHkdFields(..)
+  , WithHkdFields
   , MissingField
   , UnknownField
   , indexArray
@@ -26,12 +30,15 @@ module HiFi.Internal.Types
   ) where
 
 import           Control.DeepSeq (NFData(..))
-import           Control.Monad (void, when)
+import           Control.Monad (foldM, void, when)
 import           Control.Monad.ST (ST)
+import           Data.Coerce (coerce)
 import           Data.Kind
 import qualified Data.List as List
 import qualified Data.Primitive.Array as A
+import           Foreign.Storable (Storable)
 import qualified GHC.Exts as Exts
+import           GHC.Generics (Generic)
 import           GHC.Read (readPrec)
 import           GHC.Records
 import           GHC.TypeLits
@@ -51,39 +58,84 @@ type RecArray = A.Array Exts.Any
 -- Record Nesting
 --------------------------------------------------------------------------------
 
+-- | Marks a nested record field so that it inherits the higher kindedness of
+-- the ambient record.
 newtype NestHKD a = NestHKD { unNestHKD :: a }
--- TODO derive all the things
+  deriving newtype
+    ( Eq
+    , Generic
+    , Semigroup
+    , Monoid
+    , Ord
+    , Storable
+    , Show
+    , Read
+    )
+  deriving stock
+    ( Functor
+    , Foldable
+    , Traversable
+    )
+
+instance Applicative NestHKD where
+  pure = NestHKD
+  (<*>) = coerce
+
+instance Monad NestHKD where
+  m >>= k = k $ coerce m
 
 type FieldTy :: (Type -> Type) -> Type -> Type
 type family FieldTy f a = r | r -> f a where
   FieldTy f (NestHKD a) = HKD a f
   FieldTy f a = f a
 
+-- | Utility class used in FoldFields to allow a new HKD to be constructed
+-- from the result of the fold.
+class ToHkdFields a f where
+  toHkdFields :: a -> [f Exts.Any]
+
+instance ToHkdFields (f a) f where
+  toHkdFields x = [unsafeCoerce x]
+
+instance ToHkdFields (HKD rec f) f where
+  toHkdFields (UnsafeMkHKD arr) = Exts.toList arr
+
 --------------------------------------------------------------------------------
 -- Instances
 --------------------------------------------------------------------------------
 
-instance FoldFields Semigroup rec f => Semigroup (HKD rec f) where
+class (c a, ToHkdFields a f) => WithHkdFields c f a
+instance (c a, ToHkdFields a f) => WithHkdFields c f a
+
+instance FoldFields (WithHkdFields Semigroup f) rec f => Semigroup (HKD rec f) where
   a@(UnsafeMkHKD arr) <> b =
     let builder :: forall s. A.MutableArray s (f Exts.Any) -> ST s ()
         builder newArr = do
-          let go :: forall a. Semigroup (FieldTy f a)
+          let go :: forall a. (Semigroup (FieldTy f a), ToHkdFields (FieldTy f a) f)
                  => String
                  -> (HKD rec f -> FieldTy f a)
                  -> Int
                  -> ST s Int
               go _ getter !idx = do
-                A.writeArray newArr idx . unsafeCoerce $ getter a <> getter b
-                pure $ idx - 1
-          void $ foldFields @Semigroup @rec @f go (pure (A.sizeofArray arr - 1)) (=<<)
+                let writeElems i x = do
+                      A.writeArray newArr i x
+                      pure $! idx - 1
+                foldM writeElems idx . reverse . toHkdFields
+                  $ getter a <> getter b
+          void $ foldFields @(WithHkdFields Semigroup f) @rec @f
+                   go
+                   (pure (A.sizeofArray arr - 1))
+                   (=<<)
      in UnsafeMkHKD $ A.createArray (A.sizeofArray arr) (error "Semigroup: impossible") builder
 
-instance (FoldFields Semigroup rec f, FoldFields Monoid rec f) => Monoid (HKD rec f) where
+instance (FoldFields (WithHkdFields Semigroup f) rec f, FoldFields (WithHkdFields Monoid f) rec f)
+    => Monoid (HKD rec f) where
   mempty =
-    let go :: forall a. Monoid (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> f Exts.Any
-        go _ _ = unsafeCoerce $ mempty @(FieldTy f a)
+    let go :: forall a. (Monoid (FieldTy f a), ToHkdFields (FieldTy f a) f)
+           => String -> (HKD rec f -> FieldTy f a) -> [f Exts.Any]
+        go _ _ = toHkdFields $ mempty @(FieldTy f a)
         fields =
-          foldFields @Monoid @rec @f go [] (:)
+          foldFields @(WithHkdFields Monoid f) @rec @f go [] (++)
      in UnsafeMkHKD $ A.arrayFromList fields
 
 instance FoldFields Eq rec f => Eq (HKD rec f) where
@@ -99,13 +151,13 @@ instance FoldFields Show rec f => Show (HKD rec f) where
           fieldName <> " = " <> show (getter rec)
      in "HKD {" <> List.intercalate ", " (foldFields @Show @rec @f go [] (:)) <> "}"
 
-instance FoldFields Read rec f => Read (HKD rec f) where
+instance FoldFields (WithHkdFields Read f) rec f => Read (HKD rec f) where
   readPrec = do
-    let go :: forall a. Read (FieldTy f a)
+    let go :: forall a. (Read (FieldTy f a), ToHkdFields (FieldTy f a) f)
            => String
            -> (HKD rec f -> FieldTy f a)
            -> Bool
-           -> ReadPrec.ReadPrec (f Exts.Any)
+           -> ReadPrec.ReadPrec [f Exts.Any]
         go fieldName _ checkComma = do
           ReadPrec.lift $ do
             ReadP.string fieldName *> ReadP.skipSpaces
@@ -114,15 +166,15 @@ instance FoldFields Read rec f => Read (HKD rec f) where
           ReadPrec.lift $ do
             ReadP.skipSpaces
             when checkComma $ ReadP.char ',' *> ReadP.skipSpaces
-          pure $ unsafeCoerce x
-    ReadPrec.lift $ ReadP.string "HKD {" *> ReadP.skipSpaces
+          pure $ toHkdFields x
+    ReadPrec.lift $ ReadP.string "HKD" *> ReadP.skipSpaces *> ReadP.char '{' *> ReadP.skipSpaces
     fields <- sequence . fst
-            $ foldFields @Read @rec @f
+            $ foldFields @(WithHkdFields Read f) @rec @f
                 go
                 ([], False)
                 (\x (acc, b) -> (x b : acc, True))
     ReadPrec.lift $ ReadP.char '}' *> ReadP.eof
-    pure . UnsafeMkHKD $ A.fromList fields
+    pure . UnsafeMkHKD $ A.fromList (concat fields)
 
 instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
   compare a b =
@@ -144,10 +196,10 @@ instance (HasField (name :: Symbol) rec a, HkdHasField name rec f a, result ~ Fi
 -- Magic type classes
 --------------------------------------------------------------------------------
 
-class HasField name rec a => HkdHasField name rec f a where
+class HkdHasField name rec f a where
   hkdGetField :: HKD rec f -> FieldTy f a
 
-class HasField name rec a => HkdSetField name rec f a where
+class HkdSetField name rec f a where
   hkdSetField :: FieldTy f a -> HKD rec f -> HKD rec f
 
 class FieldGetters rec where
