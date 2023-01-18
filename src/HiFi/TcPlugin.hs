@@ -217,35 +217,33 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                      $ Ghc.newName (Ghc.mkOccName Ghc.varName "el")
              let hkdTy = Ghc.mkTyConApp hkdTyCon [recTy, effectTy]
                  hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
-             getterExpr <- do
-               apps <-
-                 case idx of
-                   Unnested ix ->
-                     let elTy = Ghc.mkAppTys effectTy [Ghc.anyTypeOfKind Ghc.liftedTypeKind]
-                         elBndr = Ghc.mkLocalIdOrCoVar elName Ghc.Many elTy
-                      in pure $ Ghc.mkCoreApps (Ghc.Var writeArrayId)
-                                  [ Ghc.Type recTy
-                                  , Ghc.Type effectTy
-                                  , Ghc.Type fieldTy
-                                  , Ghc.Var hkdBndr
-                                  , Ghc.mkUncheckedIntExpr ix
-                                  , Ghc.Var elBndr
-                                  ]
-                   Nested offset len innerRecTy _ -> do
-                     innerRecName <- Ghc.unsafeTcPluginTcM
-                                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "innerRec")
-                     let innerRecBndr = Ghc.mkLocalIdOrCoVar innerRecName Ghc.Many fieldTy
-                     pure $ Ghc.mkCoreApps (Ghc.Var setInnerRecId)
-                            [ Ghc.Type recTy
-                            , Ghc.Type effectTy
-                            , Ghc.Type innerRecTy
-                            , Ghc.Var hkdBndr
-                            , Ghc.mkUncheckedIntExpr offset
-                            , Ghc.mkUncheckedIntExpr len
-                            , Ghc.Var innerRecBndr
-                            ]
-               pure $ Ghc.mkCoreLams [hkdBndr] apps
-             pure $ Just (Just (Ghc.EvExpr getterExpr), [], ct)
+                 setterExpr =
+                   case idx of
+                     Unnested ix ->
+                       let elTy = Ghc.mkAppTys effectTy [Ghc.anyTypeOfKind Ghc.liftedTypeKind]
+                           elBndr = Ghc.mkLocalIdOrCoVar elName Ghc.Many elTy
+                        in Ghc.mkCoreLams [elBndr, hkdBndr]
+                           $ Ghc.mkCoreApps (Ghc.Var writeArrayId)
+                             [ Ghc.Type recTy
+                             , Ghc.Type effectTy
+                             , Ghc.Type fieldTy
+                             , Ghc.Var hkdBndr
+                             , Ghc.mkUncheckedIntExpr ix
+                             , Ghc.Var elBndr
+                             ]
+                     Nested offset len innerRecTy _ ->
+                       let innerRecBndr = Ghc.mkLocalIdOrCoVar elName Ghc.Many fieldTy
+                        in Ghc.mkCoreLams [innerRecBndr, hkdBndr]
+                           $ Ghc.mkCoreApps (Ghc.Var setInnerRecId)
+                             [ Ghc.Type recTy
+                             , Ghc.Type effectTy
+                             , Ghc.Type innerRecTy
+                             , Ghc.Var hkdBndr
+                             , Ghc.mkUncheckedIntExpr offset
+                             , Ghc.mkUncheckedIntExpr len
+                             , Ghc.Var innerRecBndr
+                             ]
+             pure $ Just (Just (Ghc.EvExpr setterExpr), [], ct)
 
          | otherwise -> pure Nothing
     _ -> pure Nothing
