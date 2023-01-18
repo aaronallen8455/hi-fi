@@ -48,9 +48,9 @@ data PluginInputs =
     , unknownFieldClass   :: !Ghc.Class
     , unsafeCoerceFId     :: !Ghc.Id
     , identityTyCon       :: !Ghc.TyCon
-    , hkdHasFieldClass    :: !Ghc.Class
-    , hkdSetFieldClass    :: !Ghc.Class
-    , nestedHkdName       :: !Ghc.Name
+    , hkdHasFieldName     :: !Ghc.Name
+    , hkdSetFieldName     :: !Ghc.Name
+    , nestHkdName         :: !Ghc.Name
     , getInnerRecId       :: !Ghc.Id
     , setInnerRecId       :: !Ghc.Id
     , writeArrayId        :: !Ghc.Id
@@ -86,11 +86,11 @@ lookupInputs = do
   unknownFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "UnknownField")
   unsafeCoerceFId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "unsafeCoerceF")
   identityTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig identityMod (Ghc.mkTcOcc "Identity")
-  hkdHasFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HkdHasField")
-  hkdSetFieldClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HkdSetField")
-  nestedHkdName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "NestedHKD")
-  getInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "getInnerRecId")
-  setInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "setInnerRecId")
+  hkdHasFieldName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HkdHasField")
+  hkdSetFieldName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "HkdSetField")
+  nestHkdName <- Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "NestHKD")
+  getInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "getInnerRec")
+  setInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "setInnerRec")
   writeArrayId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "writeArray")
   fieldTyTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldTy")
   pure MkPluginInputs{..}
@@ -166,7 +166,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
              pure $ Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
 
          -- HkdHasField
-         | clsName == Ghc.getName hkdHasFieldClass
+         | clsName == hkdHasFieldName
          , [ getStrTyLitVal -> Just fieldName
            , recTy
            , effectTy
@@ -201,7 +201,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
              pure $ Just (Just (Ghc.EvExpr getterExpr), [], ct)
 
          -- HkdSetField
-         | clsName == Ghc.getName hkdSetFieldClass
+         | clsName == hkdSetFieldName
          , [ getStrTyLitVal -> Just fieldName
            , recTy
            , effectTy
@@ -306,7 +306,7 @@ getRecordFields inputs = \case
         let go :: Ghc.Type -> StateT Integer Maybe FieldNesting
             go ty = StateT $ \ !ix ->
               case Ghc.tcSplitTyConApp_maybe ty of
-                Just (con, [innerRecTy]) | Ghc.getName con == nestedHkdName inputs -> do
+                Just (con, [innerRecTy]) | Ghc.getName con == nestHkdName inputs -> do
                   innerRecParts <- getRecordFields inputs innerRecTy
                   (_, lastFieldParts) <-
                     getLast . foldMap (Last . Just) $ recordFields innerRecParts

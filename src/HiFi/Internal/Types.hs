@@ -196,15 +196,19 @@ instance (HasField (name :: Symbol) rec a, HkdHasField name rec f a, result ~ Fi
 -- Magic type classes
 --------------------------------------------------------------------------------
 
+type HkdHasField :: Symbol -> Type -> (Type -> Type) -> Type -> Constraint
 class HkdHasField name rec f a where
   hkdGetField :: HKD rec f -> FieldTy f a
 
+type HkdSetField :: Symbol -> Type -> (Type -> Type) -> Type -> Constraint
 class HkdSetField name rec f a where
   hkdSetField :: FieldTy f a -> HKD rec f -> HKD rec f
 
+type FieldGetters :: Type -> Constraint
 class FieldGetters rec where
   fieldGetters :: [rec -> Exts.Any]
 
+type ToRecord :: Type -> Constraint
 class ToRecord rec where
   toRecord' :: RecArray -> rec
 
