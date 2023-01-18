@@ -41,6 +41,11 @@ tests = testGroup "tests"
   , testProperty "Show / Read single field" testShowReadSingle
   , testCase "distribute" testDistribute
   , testCase "hkd distribute" testHkdDistribute
+  , testGroup "nested"
+    [ testCase "instantiation" testInstantiationNested
+    , testProperty "trip" testTripNested
+    , testCase "setter" testSetterNested
+    ]
   ]
 
 tripRecord :: Property
@@ -478,6 +483,48 @@ testHkdDistribute = do
               }
   hkd @=? hkdDistributeShallow hkds
 
+testInstantiationNested :: Assertion
+testInstantiationNested = do
+  let hkd = mkHKD { t61 = Just 9
+                  , t62 = mkHKD
+                    { t1a = Just False
+                    , t1b = Just 99
+                    , t1c = Just 1.1
+                    , t1d = Just 9.9
+                    , t1e = Just $ UnicodeString "hello"
+                    }
+                  }
+  let rec = Test6 { t61 = 9
+                  , t62 = NestHKD Test1
+                    { t1a = False
+                    , t1b = 99
+                    , t1c = 1.1
+                    , t1d = 9.9
+                    , t1e = UnicodeString "hello"
+                    }
+                  }
+  Just rec @=? hkdSequence hkd
+
+testTripNested :: Property
+testTripNested =
+  forAll (arbitrary @Test6) $ \x ->
+    x === toRecord (fromRecord x)
+
+testSetterNested :: Assertion
+testSetterNested = do
+  let hkd :: HKD Test6 Maybe
+      hkd = mkHKD { t61 = Just 9
+                  , t62 = mkHKD
+                    { t1a = Just False
+                    , t1b = Just 99
+                    , t1c = Just 1.1
+                    , t1d = Just 9.9
+                    , t1e = Just $ UnicodeString "hello"
+                    }
+                  }
+  Just testInput1 @=?
+    hkdSequence (setField @"t62" (hkdDistribute $ Just testInput1) hkd).t62
+
 data Test1 = Test1
   { t1a :: Bool
   , t1b :: Int
@@ -723,6 +770,17 @@ data Test5 = Test5 { t51 :: Int } deriving (Show, Eq)
 
 instance Arbitrary Test5 where
   arbitrary = hkdSequence mkHKD { t51 = arbitrary }
+
+data Test6 = Test6
+  { t61 :: Double
+  , t62 :: NestHKD Test1
+  } deriving (Eq, Show)
+
+instance Arbitrary Test6 where
+  arbitrary = hkdSequence mkHKD
+    { t61 = arbitrary
+    , t62 = hkdDistribute arbitrary
+    }
 
 instance IsString UnicodeString where
   fromString = UnicodeString

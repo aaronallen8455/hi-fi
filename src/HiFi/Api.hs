@@ -19,6 +19,8 @@ module HiFi.Api
   , atField
   , StringSing(..)
   , toFieldName
+  , NestHKD(..)
+  , ToHkdFields(..)
   ) where
 
 import           Data.Coerce (coerce)
@@ -29,7 +31,7 @@ import           GHC.Records
 import           GHC.TypeLits
 import           Unsafe.Coerce (unsafeCoerce)
 
-import           HiFi.Internal.Types (FieldGetters(..), FieldTy, HKD(..), HkdSetField(..), Instantiate(..), ToRecord(..), HkdHasField, HkdSetField)
+import           HiFi.Internal.Types (FieldGetters(..), FieldTy, HKD(..), HkdHasField, HkdSetField, HkdSetField(..), Instantiate(..), NestHKD(..), ToHkdFields(..), ToRecord(..))
 import           HiFi.StringSing (StringSing(..), toFieldName)
 
 --------------------------------------------------------------------------------

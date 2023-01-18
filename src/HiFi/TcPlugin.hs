@@ -128,7 +128,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- FoldFields
          | clsName == foldFieldsName
          , [ predConTy, recordTy, effectConTy ] <- cc_tyargs
-         , Just predTyCon <- Ghc.tyConAppTyCon_maybe predConTy
+         , Just (predTyCon, predArgs) <- Ghc.tcSplitTyConApp_maybe predConTy
          , Just fields <- recordFields <$> getRecordFields inp recordTy -> do
              predClass <- Ghc.tcLookupClass $ Ghc.getName predTyCon
              result
@@ -138,6 +138,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                     recordTy
                     effectConTy
                     predClass
+                    predArgs
                     fields
              pure $ case result of
                Left newWanteds -> Just (Nothing, newWanteds, ct)
@@ -233,8 +234,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
                    Nested offset len innerRecTy _ -> do
                      innerRecName <- Ghc.unsafeTcPluginTcM
                                    $ Ghc.newName (Ghc.mkOccName Ghc.varName "innerRec")
-                     let -- innerRecTy = Ghc.mkTyConApp hkdTyCon [innerRecTy, effectTy]
-                         innerRecBndr = Ghc.mkLocalIdOrCoVar innerRecName Ghc.Many fieldTy
+                     let innerRecBndr = Ghc.mkLocalIdOrCoVar innerRecName Ghc.Many fieldTy
                      pure $ Ghc.mkCoreApps (Ghc.Var setInnerRecId)
                             [ Ghc.Type recTy
                             , Ghc.Type effectTy
@@ -587,9 +587,10 @@ buildFoldFieldsExpr
   -> Ghc.Type
   -> Ghc.Type
   -> Ghc.Class
+  -> [Ghc.Type]
   -> [(Ghc.FastString, FieldParts)]
   -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
-buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fields = do
+buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass predArgs fields = do
   accTyVarName <- Ghc.unsafeTcPluginTcM
                 $ Ghc.newName (Ghc.mkOccName Ghc.varName "acc")
   xTyVarName <- Ghc.unsafeTcPluginTcM
@@ -616,7 +617,8 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
         where
           forallBndrs = [ Ghc.mkTyCoVarBinder Ghc.Required fieldTyVar ]
           preds = [ Ghc.mkClassPred predClass
-                      [Ghc.mkTyConApp fieldTyTyCon [effectConTy, Ghc.mkTyVarTy fieldTyVar]]
+                      $ predArgs
+                     ++ [Ghc.mkTyConApp fieldTyTyCon [effectConTy, Ghc.mkTyVarTy fieldTyVar]]
                   ]
           tyBody = Ghc.stringTy
                  `Ghc.mkVisFunTyMany`
@@ -666,6 +668,7 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass fiel
                                    , Ghc.mkUncheckedIntExpr len
                                    ]
             predClassArgs =
+              predArgs ++
               [Ghc.mkTyConApp fieldTyTyCon [effectConTy, fieldType fieldParts]]
 
         predCt <- makeWantedCt ctLoc predClass predClassArgs

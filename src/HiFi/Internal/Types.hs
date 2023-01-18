@@ -91,6 +91,7 @@ type family FieldTy f a = r | r -> f a where
 
 -- | Utility class used in FoldFields to allow a new HKD to be constructed
 -- from the result of the fold.
+type ToHkdFields :: Type -> (Type -> Type) -> Constraint
 class ToHkdFields a f where
   toHkdFields :: a -> [f Exts.Any]
 
@@ -104,6 +105,7 @@ instance ToHkdFields (HKD rec f) f where
 -- Instances
 --------------------------------------------------------------------------------
 
+type WithHkdFields :: (Type -> Constraint) -> (Type -> Type) -> Type -> Constraint
 class (c a, ToHkdFields a f) => WithHkdFields c f a
 instance (c a, ToHkdFields a f) => WithHkdFields c f a
 
@@ -162,7 +164,7 @@ instance FoldFields (WithHkdFields Read f) rec f => Read (HKD rec f) where
           ReadPrec.lift $ do
             ReadP.string fieldName *> ReadP.skipSpaces
             ReadP.char '=' *> ReadP.skipSpaces
-          x <- readPrec @(FieldTy f a)
+          x <- ReadPrec.step $ readPrec @(FieldTy f a)
           ReadPrec.lift $ do
             ReadP.skipSpaces
             when checkComma $ ReadP.char ',' *> ReadP.skipSpaces
@@ -173,7 +175,9 @@ instance FoldFields (WithHkdFields Read f) rec f => Read (HKD rec f) where
                 go
                 ([], False)
                 (\x (acc, b) -> (x b : acc, True))
-    ReadPrec.lift $ ReadP.char '}' *> ReadP.eof
+    ReadPrec.lift $ ReadP.char '}' *> ReadP.skipSpaces
+    ReadPrec.readP_to_Prec $ \n ->
+      when (n == ReadPrec.minPrec) ReadP.eof
     pure . UnsafeMkHKD $ A.fromList (concat fields)
 
 instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
