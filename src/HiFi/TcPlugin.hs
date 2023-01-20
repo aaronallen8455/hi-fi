@@ -9,6 +9,8 @@ module HiFi.TcPlugin
 
 import           Control.Applicative (ZipList(..))
 import           Control.Monad
+import           Control.Monad.Trans.Class (lift)
+import           Control.Monad.Trans.Maybe (MaybeT(..), runMaybeT)
 import           Control.Monad.Trans.State.Strict (StateT(..), evalStateT)
 import           Data.Either (partitionEithers)
 import           Data.Functor ((<&>))
@@ -104,12 +106,15 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- FieldGetters
       if | clsName == fieldGettersName
          , [ recordTy ] <- cc_tyargs
-         , Just fields <- map snd . recordFields
-                      <$> getRecordFields inp recordTy
+         , Just recordParts <- getRecordFields inp recordTy
+         , let fields = map snd $ recordFields recordParts
          -> do
-             exprs <- concat <$> traverse (mkFieldGetters recordTy) fields
-             let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
-             pure $ Just (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy exprs), [], ct)
+             mExprs <- fmap concat . sequence <$>
+               traverse (mkFieldGetters recordTy (recordTyVarSubst recordParts))
+                        fields
+             for mExprs $ \exprs -> do
+               let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
+               pure (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy exprs), [], ct)
 
          -- ToRecord
          | clsName == toRecordName
@@ -271,10 +276,11 @@ data RecordParts = RecordParts
   { recordCon :: !Ghc.DataCon
   , recordTyArgs :: ![Ghc.Type]
   , recordFields :: ![(Ghc.FastString, FieldParts)]
+  , recordTyVarSubst :: !Ghc.TCvSubst -- Used to instantiate polymorphic fields
   }
 
 data FieldParts = FieldParts
-  { fieldSelName :: !Ghc.Name
+  { fieldSelName :: !Ghc.Name -- These must be instantiated if fields are polymorphic
   , fieldType :: !Ghc.Type
   , fieldNesting :: !FieldNesting
   }
@@ -299,6 +305,7 @@ getRecordFields inputs = \case
       guard . null $ Ghc.dataConTheta dataCon ++ Ghc.dataConStupidTheta dataCon
       let fieldTys = Ghc.scaledThing <$> Ghc.dataConInstOrigArgTys dataCon args
           fieldLabels = Ghc.flLabel <$> Ghc.dataConFieldLabels dataCon
+          tcSubst = Ghc.zipTCvSubst (Ghc.dataConUnivAndExTyCoVars dataCon) args
           fieldSelectors = Ghc.flSelector <$> Ghc.dataConFieldLabels dataCon
       fieldNestings <-
         let go :: Ghc.Type -> StateT Integer Maybe FieldNesting
@@ -326,25 +333,41 @@ getRecordFields inputs = \case
                            <$> ZipList fieldSelectors
                            <*> ZipList fieldTys
                            <*> ZipList fieldNestings
+        , recordTyVarSubst = tcSubst
         }
   _ -> Nothing
+
+instantiateSelector :: Ghc.CoreExpr -> Ghc.TCvSubst -> Maybe Ghc.CoreExpr
+instantiateSelector sel tcSubst = do
+  case Ghc.splitForAllTyCoVar_maybe (Ghc.exprType sel) of
+    Nothing -> pure sel
+    Just (arg, _) -> do
+      guard $ Ghc.isTyVar arg
+      sub <- Ghc.lookupTyVar tcSubst arg
+      let applied = Ghc.mkCoreApps sel [Ghc.Type sub]
+      instantiateSelector applied tcSubst
 
 -- | Produce a list of accessor functions for each field in the HKD, including
 -- nested HKDs.
 mkFieldGetters
   :: Ghc.Type
+  -> Ghc.TCvSubst
   -> FieldParts
-  -> Ghc.TcPluginM [Ghc.CoreExpr]
-mkFieldGetters recTy fp = traverse buildExpr =<< collectSels fp
+  -> Ghc.TcPluginM (Maybe [Ghc.CoreExpr])
+mkFieldGetters recTy subst fp =
+    (traverse . traverse) buildExpr
+      =<< runMaybeT (collectSels subst fp)
   where
-    collectSels :: FieldParts -> Ghc.TcPluginM [[Ghc.CoreExpr]]
-    collectSels fieldParts = do
-      selId <- Ghc.tcLookupId $ fieldSelName fieldParts
+    collectSels :: Ghc.TCvSubst -> FieldParts -> MaybeT Ghc.TcPluginM [[Ghc.CoreExpr]]
+    collectSels tcSubst fieldParts = do
+      selId <- lift . Ghc.tcLookupId $ fieldSelName fieldParts
+      selExpr <- MaybeT . pure $ instantiateSelector (Ghc.Var selId) tcSubst
       case fieldNesting fieldParts of
         Unnested{} -> pure [[Ghc.Var selId]]
         Nested _ _ _ recParts
-          -> fmap (map (Ghc.Var selId :) . concat)
-           . traverse (collectSels . snd)
+          | let newSubst = Ghc.composeTCvSubst (recordTyVarSubst recParts) tcSubst
+          -> fmap (map (selExpr :) . concat)
+           . traverse (collectSels newSubst . snd)
            $ recordFields recParts
 
     buildExpr :: [Ghc.CoreExpr] -> Ghc.TcPluginM Ghc.CoreExpr

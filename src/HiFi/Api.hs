@@ -123,6 +123,8 @@ setField = hkdSetField @name @rec @f @a
 fill :: forall rec f. FieldGetters rec => (forall a. f a) -> HKD rec f
 fill x = UnsafeMkHKD . A.arrayFromList $ unsafeCoerce x <$ fieldGetters @rec
 
+-- TODO fillC
+
 -- | A lens focusing a specific field in a HKD.
 atField :: forall (name :: Symbol) rec effect f a
          . ( HasField name rec a

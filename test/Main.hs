@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-module Main (main, Test4(..)) where
+module Main (main, Test4(..), Test7(..)) where
 
 import           Data.Foldable
 import           Data.Functor.Compose
@@ -34,7 +34,7 @@ tests = testGroup "tests"
   , testCase "effect mapping" testEffectMap
   , testCase "zipping" testZipping
   , testCase "fill" testFill
-  , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD Test2 Identity)))
+--  , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD Test2 Identity)))
   , testProperty "Eq" testEq
   , testProperty "Ord" testOrd
   , testProperty "Show / Read" testShowRead
@@ -45,6 +45,7 @@ tests = testGroup "tests"
     [ testCase "instantiation" testInstantiationNested
     , testProperty "trip" testTripNested
     , testCase "setter" testSetterNested
+    , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD (Test7 Test2) Identity)))
     ]
   ]
 
@@ -558,6 +559,16 @@ instance Arbitrary (HKD Test2 Identity) where
     , t2c = arbitrary
     }
 
+instance Arbitrary Test2 where
+  arbitrary = hkdSequence mkHKD
+    { t2a = arbitrary
+    , t2b = arbitrary
+    , t2c = arbitrary
+    }
+
+-- instance Arbitrary Test2 where
+--   arbitrary = hkdSequence (fill arbitrary) -- TODO this is causing an error
+
 data Test3 a b = Test3
   { t3a :: a
   , t3b :: [b]
@@ -780,6 +791,19 @@ instance Arbitrary Test6 where
   arbitrary = hkdSequence mkHKD
     { t61 = arbitrary
     , t62 = hkdDistribute arbitrary
+    }
+
+data Test7 r = Test7
+  { t71 :: Any
+  , t72 :: NestHKD r
+  , t73 :: Sum Int
+  }
+
+instance Arbitrary (HKD (Test7 Test2) Identity) where
+  arbitrary = fromRecord <$> hkdSequence mkHKD
+    { t71 = arbitrary
+    , t72 = hkdDistribute arbitrary
+    , t73 = arbitrary
     }
 
 instance IsString UnicodeString where

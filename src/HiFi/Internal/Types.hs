@@ -91,14 +91,14 @@ type family FieldTy f a = r | r -> f a where
 
 -- | Utility class used in FoldFields to allow a new HKD to be constructed
 -- from the result of the fold.
-type ToHkdFields :: Type -> (Type -> Type) -> Constraint
-class ToHkdFields a f where
+type ToHkdFields :: (Type -> Type) -> Type -> Constraint
+class ToHkdFields f a where
   toHkdFields :: a -> [f Exts.Any]
 
-instance ToHkdFields (f a) f where
+instance ToHkdFields f (f a) where
   toHkdFields x = [unsafeCoerce x]
 
-instance ToHkdFields (HKD rec f) f where
+instance ToHkdFields f (HKD rec f) where
   toHkdFields (UnsafeMkHKD arr) = Exts.toList arr
 
 --------------------------------------------------------------------------------
@@ -106,24 +106,24 @@ instance ToHkdFields (HKD rec f) f where
 --------------------------------------------------------------------------------
 
 type WithHkdFields :: (Type -> Constraint) -> (Type -> Type) -> Type -> Constraint
-class (c a, ToHkdFields a f) => WithHkdFields c f a
-instance (c a, ToHkdFields a f) => WithHkdFields c f a
+class (c a, ToHkdFields f a) => WithHkdFields c f a
+instance (c a, ToHkdFields f a) => WithHkdFields c f a
 
 instance FoldFields (WithHkdFields Semigroup f) rec f => Semigroup (HKD rec f) where
   a@(UnsafeMkHKD arr) <> b =
     let builder :: forall s. A.MutableArray s (f Exts.Any) -> ST s ()
         builder newArr = do
-          let go :: forall a. (Semigroup (FieldTy f a), ToHkdFields (FieldTy f a) f)
+          let go :: forall a. (Semigroup (FieldTy f a), ToHkdFields f (FieldTy f a))
                  => String
                  -> (HKD rec f -> FieldTy f a)
                  -> Int
                  -> ST s Int
-              go _ getter !idx = do
+              go fn getter !idx = do
                 let writeElems i x = do
                       A.writeArray newArr i x
-                      pure $! idx - 1
-                foldM writeElems idx . reverse . toHkdFields
-                  $ getter a <> getter b
+                      pure $! i - 1
+                    fields = toHkdFields $ getter a <> getter b
+                foldM writeElems idx $ reverse fields
           void $ foldFields @(WithHkdFields Semigroup f) @rec @f
                    go
                    (pure (A.sizeofArray arr - 1))
@@ -133,7 +133,7 @@ instance FoldFields (WithHkdFields Semigroup f) rec f => Semigroup (HKD rec f) w
 instance (FoldFields (WithHkdFields Semigroup f) rec f, FoldFields (WithHkdFields Monoid f) rec f)
     => Monoid (HKD rec f) where
   mempty =
-    let go :: forall a. (Monoid (FieldTy f a), ToHkdFields (FieldTy f a) f)
+    let go :: forall a. (Monoid (FieldTy f a), ToHkdFields f (FieldTy f a))
            => String -> (HKD rec f -> FieldTy f a) -> [f Exts.Any]
         go _ _ = toHkdFields $ mempty @(FieldTy f a)
         fields =
@@ -155,7 +155,7 @@ instance FoldFields Show rec f => Show (HKD rec f) where
 
 instance FoldFields (WithHkdFields Read f) rec f => Read (HKD rec f) where
   readPrec = do
-    let go :: forall a. (Read (FieldTy f a), ToHkdFields (FieldTy f a) f)
+    let go :: forall a. (Read (FieldTy f a), ToHkdFields f (FieldTy f a))
            => String
            -> (HKD rec f -> FieldTy f a)
            -> Bool
