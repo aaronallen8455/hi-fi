@@ -118,7 +118,7 @@ instance FoldFields (WithHkdFields Semigroup f) rec f => Semigroup (HKD rec f) w
                  -> (HKD rec f -> FieldTy f a)
                  -> Int
                  -> ST s Int
-              go fn getter !idx = do
+              go _ getter !idx = do
                 let writeElems i x = do
                       A.writeArray newArr i x
                       pure $! i - 1

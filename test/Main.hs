@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedRecordDot #-}
-module Main (main, Test4(..), Test7(..)) where
+module Main (main, Test4(..), Test7(..), Test8(..)) where
 
 import           Data.Foldable
 import           Data.Functor.Compose
@@ -34,7 +34,7 @@ tests = testGroup "tests"
   , testCase "effect mapping" testEffectMap
   , testCase "zipping" testZipping
   , testCase "fill" testFill
---  , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD Test2 Identity)))
+  , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD Test2 Identity)))
   , testProperty "Eq" testEq
   , testProperty "Ord" testOrd
   , testProperty "Show / Read" testShowRead
@@ -46,6 +46,7 @@ tests = testGroup "tests"
     , testProperty "trip" testTripNested
     , testCase "setter" testSetterNested
     , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD (Test7 Test2) Identity)))
+    , testProperty "double nest Monoid" (eq $ prop_Monoid (T @(HKD (Test8 (Test7 Test2) Test2) Identity)))
     ]
   ]
 
@@ -804,6 +805,19 @@ instance Arbitrary (HKD (Test7 Test2) Identity) where
     { t71 = arbitrary
     , t72 = hkdDistribute arbitrary
     , t73 = arbitrary
+    }
+
+data Test8 a b = Test8
+  { t81 :: Any
+  , t82 :: NestHKD a
+  , t83 :: NestHKD b
+  }
+
+instance Arbitrary (HKD (Test8 (Test7 Test2) Test2) Identity) where
+  arbitrary = fromRecord <$> hkdSequence mkHKD
+    { t81 = arbitrary
+    , t82 = hkdDistribute $ toRecord <$> arbitrary
+    , t83 = hkdDistribute arbitrary
     }
 
 instance IsString UnicodeString where

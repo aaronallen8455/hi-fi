@@ -363,7 +363,7 @@ mkFieldGetters recTy subst fp =
       selId <- lift . Ghc.tcLookupId $ fieldSelName fieldParts
       selExpr <- MaybeT . pure $ instantiateSelector (Ghc.Var selId) tcSubst
       case fieldNesting fieldParts of
-        Unnested{} -> pure [[Ghc.Var selId]]
+        Unnested{} -> pure [[selExpr]]
         Nested _ _ _ recParts
           | let newSubst = Ghc.composeTCvSubst (recordTyVarSubst recParts) tcSubst
           -> fmap (map (selExpr :) . concat)
