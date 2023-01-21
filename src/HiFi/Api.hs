@@ -16,6 +16,7 @@ module HiFi.Api
   , setField
   , getField
   , fill
+  , fillC
   , atField
   , StringSing(..)
   , toFieldName
@@ -23,15 +24,17 @@ module HiFi.Api
   , ToHkdFields(..)
   ) where
 
+import           Control.Applicative (liftA2)
 import           Data.Coerce (coerce)
 import           Data.Functor.Compose (Compose(..))
 import           Data.Functor.Identity (Identity(..))
 import qualified Data.Primitive.Array as A
+import qualified GHC.Exts as Exts
 import           GHC.Records
 import           GHC.TypeLits
 import           Unsafe.Coerce (unsafeCoerce)
 
-import           HiFi.Internal.Types (FieldGetters(..), FieldTy, HKD(..), HkdHasField, HkdSetField, HkdSetField(..), Instantiate(..), NestHKD(..), ToHkdFields(..), ToRecord(..))
+import           HiFi.Internal.Types (FieldGetters(..), FieldTy, FoldFields(..), HKD(..), HkdHasField, HkdSetField, HkdSetField(..), Instantiate(..), NestHKD(..), ToHkdFields(..), ToRecord(..), WithHkdFields)
 import           HiFi.StringSing (StringSing(..), toFieldName)
 
 --------------------------------------------------------------------------------
@@ -123,10 +126,22 @@ setField = hkdSetField @name @rec @f @a
 fill :: forall rec f. FieldGetters rec => (forall a. f a) -> HKD rec f
 fill x = UnsafeMkHKD . A.arrayFromList $ unsafeCoerce x <$ fieldGetters @rec
 
--- TODO
--- fillC :: (Applicative f, FoldFields c rec Identity) => (forall a. c a => f a) -> f rec
--- Applicative so that we can take a bunch of f [Identity Any], concat them and
--- make an f rec or HKD rec f by distributing
+fillC
+  :: forall c f rec
+   . (Applicative f, FoldFields (WithHkdFields c Identity) rec Identity)
+  => (forall a. c a => f a)
+  -> f (HKD rec Identity)
+fillC fa =
+  let go :: forall a. (c (FieldTy Identity a), ToHkdFields Identity (FieldTy Identity a))
+         => String
+         -> (HKD rec Identity -> FieldTy Identity a)
+         -> f [Identity Exts.Any]
+      go _ _ = toHkdFields <$> (fa @(FieldTy Identity a))
+   in coerce . A.arrayFromList <$>
+        foldFields @(WithHkdFields c Identity) @rec @Identity
+          go
+          (pure [] :: f [Identity Exts.Any])
+          (liftA2 (++))
 
 -- | A lens focusing a specific field in a HKD.
 atField :: forall (name :: Symbol) rec effect f a

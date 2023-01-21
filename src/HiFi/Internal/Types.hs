@@ -128,7 +128,7 @@ instance FoldFields (WithHkdFields Semigroup f) rec f => Semigroup (HKD rec f) w
                    go
                    (pure (A.sizeofArray arr - 1))
                    (=<<)
-     in UnsafeMkHKD $ A.createArray (A.sizeofArray arr) (error "Semigroup: impossible") builder
+     in coerce $ A.createArray (A.sizeofArray arr) (error "Semigroup: impossible") builder
 
 instance (FoldFields (WithHkdFields Semigroup f) rec f, FoldFields (WithHkdFields Monoid f) rec f)
     => Monoid (HKD rec f) where
@@ -138,7 +138,7 @@ instance (FoldFields (WithHkdFields Semigroup f) rec f, FoldFields (WithHkdField
         go _ _ = toHkdFields $ mempty @(FieldTy f a)
         fields =
           foldFields @(WithHkdFields Monoid f) @rec @f go [] (++)
-     in UnsafeMkHKD $ A.arrayFromList fields
+     in coerce $ A.arrayFromList fields
 
 instance FoldFields Eq rec f => Eq (HKD rec f) where
   a == b =

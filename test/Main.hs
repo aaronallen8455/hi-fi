@@ -561,14 +561,7 @@ instance Arbitrary (HKD Test2 Identity) where
     }
 
 instance Arbitrary Test2 where
-  arbitrary = hkdSequence mkHKD
-    { t2a = arbitrary
-    , t2b = arbitrary
-    , t2c = arbitrary
-    }
-
--- instance Arbitrary Test2 where
---   arbitrary = hkdSequence (fill arbitrary) -- TODO this is causing an error
+  arbitrary = toRecord <$> fillC @Arbitrary arbitrary
 
 data Test3 a b = Test3
   { t3a :: a
