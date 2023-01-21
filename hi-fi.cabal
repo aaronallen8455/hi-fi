@@ -23,6 +23,15 @@ library
     other-modules: HiFi.GhcFacade,
                    HiFi.Api,
                    HiFi.TcPlugin,
+                   HiFi.TcPlugin.FieldGetters,
+                   HiFi.TcPlugin.FoldFields,
+                   HiFi.TcPlugin.HkdHasField,
+                   HiFi.TcPlugin.HkdSetField,
+                   HiFi.TcPlugin.Instantiate,
+                   HiFi.TcPlugin.PluginInputs,
+                   HiFi.TcPlugin.RecordParts,
+                   HiFi.TcPlugin.ToRecord,
+                   HiFi.TcPlugin.Utils,
                    HiFi.ParseResultAction,
                    HiFi.StringSing
     -- other-extensions:
