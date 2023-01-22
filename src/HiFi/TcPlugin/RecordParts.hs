@@ -4,7 +4,7 @@ module HiFi.TcPlugin.RecordParts
   ( RecordParts(..)
   , FieldParts(..)
   , FieldNesting(..)
-  , getRecordFields
+  , getRecordParts
   ) where
 
 import           Control.Monad
@@ -46,8 +46,8 @@ instance Eq TyOrd where
 instance Ord TyOrd where
   compare = coerce Ghc.nonDetCmpType
 
-getRecordFields :: PluginInputs -> S.Set TyOrd -> Ghc.Type -> Maybe RecordParts
-getRecordFields inputs visitedTys recTy = case recTy of
+getRecordParts :: PluginInputs -> S.Set TyOrd -> Ghc.Type -> Maybe RecordParts
+getRecordParts inputs visitedTys recTy = case recTy of
   Ghc.TyConApp tyCon args
     | Ghc.isAlgTyCon tyCon
     , Ghc.DataTyCon{..} <- Ghc.algTyConRhs tyCon
@@ -70,7 +70,7 @@ getRecordFields inputs visitedTys recTy = case recTy of
             go ty = StateT $ \ !ix ->
               case Ghc.tcSplitTyConApp_maybe ty of
                 Just (con, [innerRecTy]) | Ghc.getName con == nestHkdName inputs -> do
-                  innerRecParts <- getRecordFields inputs newVisitedTys innerRecTy
+                  innerRecParts <- getRecordParts inputs newVisitedTys innerRecTy
                   (_, lastFieldParts) <-
                     getLast . foldMap (Last . Just) $ recordFields innerRecParts
                   let len = case fieldNesting lastFieldParts of

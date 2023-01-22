@@ -19,6 +19,7 @@ module HiFi.Internal.Types
   , WithHkdFields
   , MissingField
   , UnknownField
+  , UnsupportedRecord
   , indexArray
   , writeArray
   , getInnerRec
@@ -250,6 +251,15 @@ instance
   TypeError (Text "Unknown field '" :<>: Text fieldName
         :<>: Text "' for '" :<>: ShowType rec :<>: Text "'")
   => UnknownField fieldName rec
+
+type UnsupportedRecord :: Type -> Constraint
+class UnsupportedRecord rec
+instance
+  TypeError (Text "Unsupported type for HKD promotion: '" :<>: ShowType rec :<>: Text "'."
+        :$$: Text "Only record types without existentials or constraint contexts can be promoted to HKDs."
+        :$$: Text "Additionally, nested HKDs are not allowed to be infinite."
+            )
+  => UnsupportedRecord rec
 
 --------------------------------------------------------------------------------
 -- Utils

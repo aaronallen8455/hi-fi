@@ -5,6 +5,7 @@ build-depends:
 -}
 
 {-# OPTIONS_GHC -fplugin HiFi #-}
+{-# LANGUAGE TypeApplications #-}
 
 import           HiFi
 
@@ -19,7 +20,7 @@ data Inner = Inner
 hkd :: HKD TestRec Maybe
 hkd = mkHKD
   { f1 = Just True
-  , f2 = mkHKD { i1 = hkd }
+  , f2 = (mkHKD @Inner) { i1 = hkd }
   }
 
 main :: IO ()

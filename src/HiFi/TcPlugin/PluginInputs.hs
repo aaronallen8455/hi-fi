@@ -8,30 +8,31 @@ import qualified HiFi.GhcFacade as Ghc
 
 data PluginInputs =
   MkPluginInputs
-    { fieldGettersName    :: !Ghc.Name
-    , toRecordName        :: !Ghc.Name
-    , foldFieldsName      :: !Ghc.Name
-    , instantiateName     :: !Ghc.Name
-    , indexArrayId        :: !Ghc.Id
-    , recArrayTyCon       :: !Ghc.TyCon
-    , fieldNameTyCon      :: !Ghc.TyCon
-    , mkFieldNameDataCon  :: !Ghc.DataCon
-    , arrayFromListId     :: !Ghc.Id
-    , fieldTypeCheckClass :: !Ghc.Class
-    , hasFieldClass       :: !Ghc.Class
-    , knownSymbolClass    :: !Ghc.Class
-    , hkdTyCon            :: !Ghc.TyCon
-    , missingFieldClass   :: !Ghc.Class
-    , unknownFieldClass   :: !Ghc.Class
-    , unsafeCoerceFId     :: !Ghc.Id
-    , identityTyCon       :: !Ghc.TyCon
-    , hkdHasFieldName     :: !Ghc.Name
-    , hkdSetFieldName     :: !Ghc.Name
-    , nestHkdName         :: !Ghc.Name
-    , getInnerRecId       :: !Ghc.Id
-    , setInnerRecId       :: !Ghc.Id
-    , writeArrayId        :: !Ghc.Id
-    , fieldTyTyCon        :: !Ghc.TyCon
+    { fieldGettersName       :: !Ghc.Name
+    , toRecordName           :: !Ghc.Name
+    , foldFieldsName         :: !Ghc.Name
+    , instantiateName        :: !Ghc.Name
+    , indexArrayId           :: !Ghc.Id
+    , recArrayTyCon          :: !Ghc.TyCon
+    , fieldNameTyCon         :: !Ghc.TyCon
+    , mkFieldNameDataCon     :: !Ghc.DataCon
+    , arrayFromListId        :: !Ghc.Id
+    , fieldTypeCheckClass    :: !Ghc.Class
+    , hasFieldClass          :: !Ghc.Class
+    , knownSymbolClass       :: !Ghc.Class
+    , hkdTyCon               :: !Ghc.TyCon
+    , missingFieldClass      :: !Ghc.Class
+    , unknownFieldClass      :: !Ghc.Class
+    , unsafeCoerceFId        :: !Ghc.Id
+    , identityTyCon          :: !Ghc.TyCon
+    , hkdHasFieldName        :: !Ghc.Name
+    , hkdSetFieldName        :: !Ghc.Name
+    , nestHkdName            :: !Ghc.Name
+    , getInnerRecId          :: !Ghc.Id
+    , setInnerRecId          :: !Ghc.Id
+    , writeArrayId           :: !Ghc.Id
+    , fieldTyTyCon           :: !Ghc.TyCon
+    , unsupportedRecordClass :: !Ghc.Class
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -70,5 +71,6 @@ lookupInputs = do
   setInnerRecId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "setInnerRec")
   writeArrayId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "writeArray")
   fieldTyTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldTy")
+  unsupportedRecordClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "UnsupportedRecord")
 
   pure MkPluginInputs{..}

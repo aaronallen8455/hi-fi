@@ -18,6 +18,7 @@ import           HiFi.TcPlugin.Instantiate (gatherTupleFieldsAndBuildExpr, mkFie
 import           HiFi.TcPlugin.PluginInputs
 import           HiFi.TcPlugin.RecordParts
 import           HiFi.TcPlugin.ToRecord (mkToRecordExpr)
+import           HiFi.TcPlugin.Utils (makeWantedCt)
 
 tcPlugin :: Ghc.TcPlugin
 tcPlugin = Ghc.TcPlugin
@@ -38,48 +39,47 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- FieldGetters
       if | clsName == fieldGettersName
          , [ recordTy ] <- cc_tyargs
-         , Just recordParts <- getRecordFields inp mempty recordTy
-         , let fields = map snd $ recordFields recordParts
-         -> do
-             mExprs <- fmap concat . sequence <$>
-               traverse (mkFieldGetters recordTy (recordTyVarSubst recordParts))
-                        fields
-             for mExprs $ \exprs -> do
-               let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
-               pure (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy exprs), [], ct)
+         -> guardSupportedRecord inp recordTy ct $ \recordParts -> do
+              let fields = map snd $ recordFields recordParts
+              mExprs <- fmap concat . sequence <$>
+                traverse (mkFieldGetters recordTy (recordTyVarSubst recordParts))
+                         fields
+              for mExprs $ \exprs -> do
+                let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
+                pure (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy exprs), [], ct)
 
          -- ToRecord
          | clsName == toRecordName
          , [ recordTy ] <- cc_tyargs
-         , Just recordParts <- getRecordFields inp mempty recordTy
          , Just arrType <- Ghc.synTyConRhs_maybe recArrayTyCon
-         -> do
-             arrBindName <- Ghc.unsafeTcPluginTcM
-                          $ Ghc.newName (Ghc.mkOccName Ghc.varName "arr")
+         -> guardSupportedRecord inp recordTy ct $ \recordParts -> do
+              arrBindName <- Ghc.unsafeTcPluginTcM
+                           $ Ghc.newName (Ghc.mkOccName Ghc.varName "arr")
 
-             let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.Many arrType
-                 expr = mkToRecordExpr inp recordTy recordParts arrBind 0
-                 result = Ghc.mkCoreLams [arrBind] expr
-             pure $ Just (Just (Ghc.EvExpr result), [], ct)
+              let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.Many arrType
+                  expr = mkToRecordExpr inp recordTy recordParts arrBind 0
+                  result = Ghc.mkCoreLams [arrBind] expr
+              pure $ Just (Just (Ghc.EvExpr result), [], ct)
 
          -- FoldFields
          | clsName == foldFieldsName
          , [ predConTy, recordTy, effectConTy ] <- cc_tyargs
          , Just (predTyCon, predArgs) <- Ghc.tcSplitTyConApp_maybe predConTy
-         , Just fields <- recordFields <$> getRecordFields inp mempty recordTy -> do
-             predClass <- Ghc.tcLookupClass $ Ghc.getName predTyCon
-             result
-               <- buildFoldFieldsExpr
-                    inp
-                    (Ghc.ctLoc ct)
-                    recordTy
-                    effectConTy
-                    predClass
-                    predArgs
-                    fields
-             pure $ case result of
-               Left newWanteds -> Just (Nothing, newWanteds, ct)
-               Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
+         -> guardSupportedRecord inp recordTy ct $ \recordParts -> do
+              let fields = recordFields recordParts
+              predClass <- Ghc.tcLookupClass $ Ghc.getName predTyCon
+              result
+                <- buildFoldFieldsExpr
+                     inp
+                     (Ghc.ctLoc ct)
+                     recordTy
+                     effectConTy
+                     predClass
+                     predArgs
+                     fields
+              pure $ case result of
+                Left newWanteds -> Just (Nothing, newWanteds, ct)
+                Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
 
          -- Instantiate
          | clsName == instantiateName
@@ -87,21 +87,22 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , effectCon
            , tupleTy
            ] <- cc_tyargs
-         , Just fields <- recordFields <$> getRecordFields inp mempty recTy -> do
-             (tuplePairs, instantiateExpr)
-               <- gatherTupleFieldsAndBuildExpr inp fields recTy tupleTy effectCon
-             let recordFieldMap = Ghc.listToUFM
-                                $ (\(label, parts) -> (label, (label, fieldType parts)))
-                              <$> fields
-             newWanteds <-
-               mkFieldTypeCheckWanteds
-                 inp
-                 (Ghc.ctLoc ct)
-                 recTy
-                 recordFieldMap
-                 tuplePairs
-                 effectCon
-             pure $ Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
+         -> guardSupportedRecord inp recTy ct $ \recordParts -> do
+              let fields = recordFields recordParts
+              (tuplePairs, instantiateExpr)
+                <- gatherTupleFieldsAndBuildExpr inp fields recTy tupleTy effectCon
+              let recordFieldMap = Ghc.listToUFM
+                                 $ (\(label, parts) -> (label, (label, fieldType parts)))
+                               <$> fields
+              newWanteds <-
+                mkFieldTypeCheckWanteds
+                  inp
+                  (Ghc.ctLoc ct)
+                  recTy
+                  recordFieldMap
+                  tuplePairs
+                  effectCon
+              pure $ Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
 
          -- HkdHasField
          | clsName == hkdHasFieldName
@@ -110,11 +111,12 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , effectTy
            , _fieldTy
            ] <- cc_tyargs
-         , Just fields <- recordFields <$> getRecordFields inp mempty recTy
-         , let namesToIndexes = fmap fieldNesting <$> fields
-         , Just idx <- lookup fieldName namesToIndexes -> do
-             getterExpr <- mkHkdHasFieldExpr inp recTy effectTy idx
-             pure $ Just (Just (Ghc.EvExpr getterExpr), [], ct)
+         -> guardSupportedRecord inp recTy ct $ \recordParts -> do
+              let fields = recordFields recordParts
+                  namesToIndexes = fmap fieldNesting <$> fields
+              for (lookup fieldName namesToIndexes) $ \idx -> do
+                getterExpr <- mkHkdHasFieldExpr inp recTy effectTy idx
+                pure (Just (Ghc.EvExpr getterExpr), [], ct)
 
          -- HkdSetField
          | clsName == hkdSetFieldName
@@ -123,11 +125,12 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , effectTy
            , fieldTy
            ] <- cc_tyargs
-         , Just fields <- recordFields <$> getRecordFields inp mempty recTy
-         , let namesToIndexes = fmap fieldNesting <$> fields
-         , Just idx <- lookup fieldName namesToIndexes -> do
-             setterExpr <- mkHkdSetFieldExpr inp recTy effectTy fieldTy idx
-             pure $ Just (Just (Ghc.EvExpr setterExpr), [], ct)
+         -> guardSupportedRecord inp recTy ct $ \recordParts -> do
+              let fields = recordFields recordParts
+                  namesToIndexes = fmap fieldNesting <$> fields
+              for (lookup fieldName namesToIndexes) $ \idx -> do
+                setterExpr <- mkHkdSetFieldExpr inp recTy effectTy fieldTy idx
+                pure (Just (Ghc.EvExpr setterExpr), [], ct)
 
          | otherwise -> pure Nothing
     _ -> pure Nothing
@@ -150,3 +153,22 @@ getStrTyLitVal :: Ghc.Type -> Maybe Ghc.FastString
 getStrTyLitVal = \case
   Ghc.LitTy (Ghc.StrTyLit fs) -> Just fs
   _ -> Nothing
+
+guardSupportedRecord
+  :: PluginInputs
+  -> Ghc.Type
+  -> Ghc.Ct
+  -> (RecordParts -> Ghc.TcPluginM (Maybe (Maybe Ghc.EvTerm, [Ghc.Ct], Ghc.Ct)))
+  -> Ghc.TcPluginM (Maybe (Maybe Ghc.EvTerm, [Ghc.Ct], Ghc.Ct))
+guardSupportedRecord inp recordTy ct k = do
+  -- If the record type is a type variable, return nothing so that the constraint
+  -- will be attempted again when the variable is instantiated.
+  if Ghc.tcIsTyVarTy recordTy
+     then pure Nothing
+     else case getRecordParts inp mempty recordTy of
+      Nothing -> do
+        -- use the place holder evidence for the wanted constraint so that the
+        -- desired error message will be displayed.
+        newWanted <- makeWantedCt (Ghc.ctLoc ct) (unsupportedRecordClass inp) [recordTy]
+        pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
+      Just recParts -> k recParts
