@@ -10,7 +10,9 @@ module HiFi.TcPlugin.RecordParts
 import           Control.Monad
 import           Control.Applicative (ZipList(..))
 import           Control.Monad.Trans.State.Strict (StateT(..), evalStateT)
+import           Data.Coerce (coerce)
 import           Data.Monoid (Last(..))
+import qualified Data.Set as S
 
 import qualified HiFi.GhcFacade as Ghc
 import           HiFi.TcPlugin.PluginInputs
@@ -36,26 +38,39 @@ data FieldNesting
       !Ghc.Type -- record ty
       !RecordParts
 
-getRecordFields :: PluginInputs -> Ghc.Type -> Maybe RecordParts
-getRecordFields inputs = \case
+newtype TyOrd = TyOrd Ghc.Type
+
+instance Eq TyOrd where
+  (==) = coerce Ghc.eqType
+
+instance Ord TyOrd where
+  compare = coerce Ghc.nonDetCmpType
+
+getRecordFields :: PluginInputs -> S.Set TyOrd -> Ghc.Type -> Maybe RecordParts
+getRecordFields inputs visitedTys recTy = case recTy of
   Ghc.TyConApp tyCon args
     | Ghc.isAlgTyCon tyCon
     , Ghc.DataTyCon{..} <- Ghc.algTyConRhs tyCon
-    , [dataCon] <- data_cons -> do
+    -- Don't allow infinite recursion of nested HKDs
+    , not $ S.member (TyOrd recTy) visitedTys
+    , [dataCon] <- data_cons
       -- Don't allow existential ty vars
-      guard $ length (Ghc.dataConUnivAndExTyCoVars dataCon) == length args
+    , length (Ghc.dataConUnivAndExTyCoVars dataCon) == length args
       -- Don't allow contexts
-      guard . null $ Ghc.dataConTheta dataCon ++ Ghc.dataConStupidTheta dataCon
+    , null $ Ghc.dataConTheta dataCon ++ Ghc.dataConStupidTheta dataCon -> do
       let fieldTys = Ghc.scaledThing <$> Ghc.dataConInstOrigArgTys dataCon args
           fieldLabels = Ghc.flLabel <$> Ghc.dataConFieldLabels dataCon
           tcSubst = Ghc.zipTCvSubst (Ghc.dataConUnivAndExTyCoVars dataCon) args
           fieldSelectors = Ghc.flSelector <$> Ghc.dataConFieldLabels dataCon
+          newVisitedTys = S.insert (TyOrd recTy) visitedTys
+      guard . not $ null fieldTys
+      guard $ length fieldTys == length fieldLabels
       fieldNestings <-
         let go :: Ghc.Type -> StateT Integer Maybe FieldNesting
             go ty = StateT $ \ !ix ->
               case Ghc.tcSplitTyConApp_maybe ty of
                 Just (con, [innerRecTy]) | Ghc.getName con == nestHkdName inputs -> do
-                  innerRecParts <- getRecordFields inputs innerRecTy
+                  innerRecParts <- getRecordFields inputs newVisitedTys innerRecTy
                   (_, lastFieldParts) <-
                     getLast . foldMap (Last . Just) $ recordFields innerRecParts
                   let len = case fieldNesting lastFieldParts of
@@ -64,8 +79,6 @@ getRecordFields inputs = \case
                   Just (Nested ix len innerRecTy innerRecParts, ix + len)
                 _ -> pure (Unnested ix, ix + 1)
          in evalStateT (traverse go fieldTys) 0
-      guard . not $ null fieldTys
-      guard $ length fieldTys == length fieldLabels
       -- add a guard for equality of rep arity and source arity?
       Just RecordParts
         { recordCon = dataCon

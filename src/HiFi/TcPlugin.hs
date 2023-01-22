@@ -38,7 +38,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- FieldGetters
       if | clsName == fieldGettersName
          , [ recordTy ] <- cc_tyargs
-         , Just recordParts <- getRecordFields inp recordTy
+         , Just recordParts <- getRecordFields inp mempty recordTy
          , let fields = map snd $ recordFields recordParts
          -> do
              mExprs <- fmap concat . sequence <$>
@@ -51,7 +51,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          -- ToRecord
          | clsName == toRecordName
          , [ recordTy ] <- cc_tyargs
-         , Just recordParts <- getRecordFields inp recordTy
+         , Just recordParts <- getRecordFields inp mempty recordTy
          , Just arrType <- Ghc.synTyConRhs_maybe recArrayTyCon
          -> do
              arrBindName <- Ghc.unsafeTcPluginTcM
@@ -66,7 +66,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
          | clsName == foldFieldsName
          , [ predConTy, recordTy, effectConTy ] <- cc_tyargs
          , Just (predTyCon, predArgs) <- Ghc.tcSplitTyConApp_maybe predConTy
-         , Just fields <- recordFields <$> getRecordFields inp recordTy -> do
+         , Just fields <- recordFields <$> getRecordFields inp mempty recordTy -> do
              predClass <- Ghc.tcLookupClass $ Ghc.getName predTyCon
              result
                <- buildFoldFieldsExpr
@@ -87,7 +87,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , effectCon
            , tupleTy
            ] <- cc_tyargs
-         , Just fields <- recordFields <$> getRecordFields inp recTy -> do
+         , Just fields <- recordFields <$> getRecordFields inp mempty recTy -> do
              (tuplePairs, instantiateExpr)
                <- gatherTupleFieldsAndBuildExpr inp fields recTy tupleTy effectCon
              let recordFieldMap = Ghc.listToUFM
@@ -110,7 +110,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , effectTy
            , _fieldTy
            ] <- cc_tyargs
-         , Just fields <- recordFields <$> getRecordFields inp recTy
+         , Just fields <- recordFields <$> getRecordFields inp mempty recTy
          , let namesToIndexes = fmap fieldNesting <$> fields
          , Just idx <- lookup fieldName namesToIndexes -> do
              getterExpr <- mkHkdHasFieldExpr inp recTy effectTy idx
@@ -123,7 +123,7 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
            , effectTy
            , fieldTy
            ] <- cc_tyargs
-         , Just fields <- recordFields <$> getRecordFields inp recTy
+         , Just fields <- recordFields <$> getRecordFields inp mempty recTy
          , let namesToIndexes = fmap fieldNesting <$> fields
          , Just idx <- lookup fieldName namesToIndexes -> do
              setterExpr <- mkHkdSetFieldExpr inp recTy effectTy fieldTy idx

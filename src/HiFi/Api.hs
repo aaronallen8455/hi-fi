@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 module HiFi.Api
   ( hkdMap
@@ -97,7 +96,7 @@ hkdPure :: (Applicative f, FieldGetters rec) => rec -> HKD rec f
 hkdPure = hkdMap (pure . coerce) . fromRecord
 
 toRecord :: ToRecord rec => HKD rec Identity -> rec
-toRecord (UnsafeMkHKD arr) = toRecord' $ coerce arr
+toRecord = toRecord' . coerce
 
 -- This function must be inlined, otherwise it behaves incorrectly with >O0
 {-# INLINE fromRecord #-}
