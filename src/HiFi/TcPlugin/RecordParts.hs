@@ -1,5 +1,5 @@
+{-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE LambdaCase #-}
 module HiFi.TcPlugin.RecordParts
   ( RecordParts(..)
   , FieldParts(..)
@@ -11,6 +11,7 @@ import           Control.Monad
 import           Control.Applicative (ZipList(..))
 import           Control.Monad.Trans.State.Strict (StateT(..), evalStateT)
 import           Data.Coerce (coerce)
+import           Data.Maybe (fromMaybe)
 import           Data.Monoid (Last(..))
 import qualified Data.Set as S
 
@@ -46,8 +47,12 @@ instance Eq TyOrd where
 instance Ord TyOrd where
   compare = coerce Ghc.nonDetCmpType
 
+-- This does not resolve type families instances
+expandSynonyms :: Ghc.Type -> Ghc.Type
+expandSynonyms ty = fromMaybe ty $ Ghc.tcView ty
+
 getRecordParts :: PluginInputs -> S.Set TyOrd -> Ghc.Type -> Maybe RecordParts
-getRecordParts inputs visitedTys recTy = case recTy of
+getRecordParts inputs visitedTys (expandSynonyms -> recTy) = case recTy of
   Ghc.TyConApp tyCon args
     | Ghc.isAlgTyCon tyCon
     , Ghc.DataTyCon{..} <- Ghc.algTyConRhs tyCon

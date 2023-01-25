@@ -257,7 +257,7 @@ class UnsupportedRecord rec
 instance
   TypeError (Text "Unsupported type for HKD promotion: '" :<>: ShowType rec :<>: Text "'."
         :$$: Text "Only record types without existentials or constraint contexts can be promoted to HKDs."
-        :$$: Text "Additionally, nested HKDs are not allowed to be infinite."
+        :$$: Text "Additionally, nested HKDs are not allowed to be infinite or type family applications."
             )
   => UnsupportedRecord rec
 

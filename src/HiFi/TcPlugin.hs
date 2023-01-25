@@ -160,7 +160,7 @@ guardSupportedRecord
   -> Ghc.Ct
   -> (RecordParts -> Ghc.TcPluginM (Maybe (Maybe Ghc.EvTerm, [Ghc.Ct], Ghc.Ct)))
   -> Ghc.TcPluginM (Maybe (Maybe Ghc.EvTerm, [Ghc.Ct], Ghc.Ct))
-guardSupportedRecord inp recordTy ct k = do
+guardSupportedRecord inp recordTy ct k =
   -- If the record type is a type variable, return nothing so that the constraint
   -- will be attempted again when the variable is instantiated.
   if Ghc.tcIsTyVarTy recordTy

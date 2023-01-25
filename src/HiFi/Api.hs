@@ -18,6 +18,7 @@ module HiFi.Api
   , fill
   , fillC
   , atField
+  , hkdUpdate
   , StringSing(..)
   , toFieldName
   , NestHKD(..)
@@ -155,3 +156,6 @@ atField :: forall (name :: Symbol) rec effect f a
 atField afa rec =
   flip (setField @name) rec <$> afa (getField @name rec)
 
+hkdUpdate :: (ToRecord rec, FieldGetters rec) => HKD rec Maybe -> rec -> rec
+hkdUpdate upd rec =
+  toRecord $ hkdZipWith (\m i -> maybe i coerce m) upd (fromRecord rec)
