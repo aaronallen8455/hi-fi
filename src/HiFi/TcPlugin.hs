@@ -7,6 +7,7 @@ module HiFi.TcPlugin
   ( tcPlugin
   ) where
 
+import           Control.Monad.Trans.Except
 import           Data.Traversable (for)
 
 import qualified HiFi.GhcFacade as Ghc
@@ -154,6 +155,8 @@ getStrTyLitVal = \case
   Ghc.LitTy (Ghc.StrTyLit fs) -> Just fs
   _ -> Nothing
 
+-- | Emit the UnsupportedRecord wanted constraint if the type is not supported
+-- for HKD promotion.
 guardSupportedRecord
   :: PluginInputs
   -> Ghc.Type
@@ -165,10 +168,16 @@ guardSupportedRecord inp recordTy ct k =
   -- will be attempted again when the variable is instantiated.
   if Ghc.tcIsTyVarTy recordTy
      then pure Nothing
-     else case getRecordParts inp mempty recordTy of
-      Nothing -> do
-        -- use the place holder evidence for the wanted constraint so that the
-        -- desired error message will be displayed.
-        newWanted <- makeWantedCt (Ghc.ctLoc ct) (unsupportedRecordClass inp) [recordTy]
-        pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
-      Just recParts -> k recParts
+     else do
+      eParts <- runExceptT $ getRecordParts inp mempty recordTy
+      case eParts of
+        Left (UnsupportedTy ty) -> do
+          -- use the place holder evidence for the wanted constraint so that the
+          -- desired error message will be displayed.
+          newWanted <- makeWantedCt (Ghc.ctLoc ct) (unsupportedRecordClass inp) [ty]
+          pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
+        Left (DataConNotInScope dataCon) -> do
+          newWanted <- makeWantedCt (Ghc.ctLoc ct) (dataConNotInScopeClass inp)
+                         [Ghc.mkTyConTy $ Ghc.promoteDataCon dataCon]
+          pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
+        Right recParts -> k recParts

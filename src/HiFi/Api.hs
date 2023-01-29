@@ -17,12 +17,14 @@ module HiFi.Api
   , getField
   , fill
   , fillC
+  , fillCWithName
   , atField
   , hkdUpdate
   , StringSing(..)
   , toFieldName
   , NestHKD(..)
   , ToHkdFields(..)
+  , FoldFields(..)
   ) where
 
 import           Control.Applicative (liftA2)
@@ -132,12 +134,19 @@ fillC
    . (Applicative f, FoldFields (WithHkdFields c Identity) rec Identity)
   => (forall a. c a => f a)
   -> f (HKD rec Identity)
-fillC fa =
+fillC fa = fillCWithName @c (const fa)
+
+fillCWithName
+  :: forall c f rec
+   . (Applicative f, FoldFields (WithHkdFields c Identity) rec Identity)
+  => (forall a. c a => String -> f a)
+  -> f (HKD rec Identity)
+fillCWithName fa =
   let go :: forall a. (c (FieldTy Identity a), ToHkdFields Identity (FieldTy Identity a))
          => String
          -> (HKD rec Identity -> FieldTy Identity a)
          -> f [Identity Exts.Any]
-      go _ _ = toHkdFields <$> (fa @(FieldTy Identity a))
+      go name _ = toHkdFields <$> fa @(FieldTy Identity a) name
    in coerce . A.arrayFromList <$>
         foldFields @(WithHkdFields c Identity) @rec @Identity
           go

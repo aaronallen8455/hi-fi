@@ -261,6 +261,14 @@ instance
             )
   => UnsupportedRecord rec
 
+type DataConNotInScope :: Type -> Constraint
+class DataConNotInScope dataCon
+instance
+  TypeError (Text "Data constructor must be in scope for HKD promotion: "
+        :<>: ShowType dataCon :<>: Text "'"
+            )
+  => DataConNotInScope dataCon
+
 --------------------------------------------------------------------------------
 -- Utils
 --------------------------------------------------------------------------------

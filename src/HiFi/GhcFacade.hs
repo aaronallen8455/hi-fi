@@ -13,6 +13,7 @@ module HiFi.GhcFacade
   ) where
 
 #if MIN_VERSION_ghc(9,4,0)
+import           GHC as Ghc (lookupName)
 import           GHC.Plugins as Ghc hiding (DefaultingPlugin, TcPlugin, varName, substTy, isInScope, extendTvSubst)
 import           GHC.Tc.Types as Ghc
 import           GHC.Core.TyCo.Rep as Ghc
@@ -49,6 +50,7 @@ import           GHC.Tc.Types.Origin as Ghc
 import           GHC.Parser.Annotation as Ghc (noComments)
 
 #elif MIN_VERSION_ghc(9,2,0)
+import           GHC as Ghc (lookupName)
 import           GHC.Plugins as Ghc hiding (TcPlugin, varName, substTy, isInScope, extendTvSubst)
 import           GHC.Tc.Types as Ghc
 import           GHC.Core.TyCo.Rep as Ghc

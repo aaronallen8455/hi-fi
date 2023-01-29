@@ -33,6 +33,7 @@ data PluginInputs =
     , writeArrayId           :: !Ghc.Id
     , fieldTyTyCon           :: !Ghc.TyCon
     , unsupportedRecordClass :: !Ghc.Class
+    , dataConNotInScopeClass :: !Ghc.Class
     }
 
 findModule :: String -> Ghc.TcPluginM Ghc.Module
@@ -72,5 +73,6 @@ lookupInputs = do
   writeArrayId <- Ghc.tcLookupId =<< Ghc.lookupOrig hiFiMod (Ghc.mkVarOcc "writeArray")
   fieldTyTyCon <- Ghc.tcLookupTyCon =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "FieldTy")
   unsupportedRecordClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "UnsupportedRecord")
+  dataConNotInScopeClass <- Ghc.tcLookupClass =<< Ghc.lookupOrig hiFiMod (Ghc.mkTcOcc "DataConNotInScope")
 
   pure MkPluginInputs{..}

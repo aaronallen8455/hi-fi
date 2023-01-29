@@ -18,3 +18,9 @@ echo "unsatisfied constraint passed"
 
 cabal exec cabal v2-run type-error-test/InfiniteNesting.hs 2>&1 | grep "Unsupported type for HKD promotion: 'TestRec'" > /dev/null
 echo "infinite nesting passed"
+
+cabal exec cabal v2-run type-error-test/OutOfScopeDataCon.hs 2>&1 | grep "Data constructor must be in scope for HKD promotion: 'Record.MkR'" > /dev/null
+echo "data con out of scope passed"
+
+cabal exec cabal v2-run type-error-test/InScopeDataCon.hs
+echo "data con in scope passed"
