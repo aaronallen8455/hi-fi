@@ -23,17 +23,11 @@ buildFoldFieldsExpr
   -> [Ghc.Type]
   -> [(Ghc.FastString, FieldParts)]
   -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
-buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass predArgs fields = do
+buildFoldFieldsExpr inp@MkPluginInputs{..} ctLoc recordTy effectConTy predClass predArgs fields = do
   accTyVarName <- Ghc.unsafeTcPluginTcM
                 $ Ghc.newName (Ghc.mkOccName Ghc.varName "acc")
   xTyVarName <- Ghc.unsafeTcPluginTcM
               $ Ghc.newName (Ghc.mkOccName Ghc.varName "x")
-
-  fieldGenName <- Ghc.unsafeTcPluginTcM
-                $ Ghc.newName (Ghc.mkOccName Ghc.varName "fieldGen")
-
-  fieldTyVarName <- Ghc.unsafeTcPluginTcM
-                  $ Ghc.newName (Ghc.mkOccName Ghc.varName "a")
   accumulatorName <- Ghc.unsafeTcPluginTcM
                    $ Ghc.newName (Ghc.mkOccName Ghc.varName "accumulator")
   initAccName <- Ghc.unsafeTcPluginTcM
@@ -41,28 +35,13 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass pred
   hkdName <- Ghc.unsafeTcPluginTcM
            $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
 
-  let fieldTyVar = Ghc.mkTyVar fieldTyVarName Ghc.liftedTypeKind
-      accTyVar = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
+  let accTyVar = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
       xTyVar = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
-
       hkdTy = Ghc.mkTyConApp hkdTyCon [recordTy, effectConTy]
-      fieldGenTy = Ghc.mkSigmaTy forallBndrs preds tyBody
-        where
-          forallBndrs = [ Ghc.mkTyCoVarBinder Ghc.Required fieldTyVar ]
-          preds = [ Ghc.mkClassPred predClass
-                      $ predArgs
-                     ++ [Ghc.mkTyConApp fieldTyTyCon [effectConTy, Ghc.mkTyVarTy fieldTyVar]]
-                  ]
-          tyBody = Ghc.stringTy
-                 `Ghc.mkVisFunTyMany`
-                   ( hkdTy
-                   `Ghc.mkVisFunTyMany`
-                     Ghc.mkTyConApp fieldTyTyCon [effectConTy, Ghc.mkTyVarTy fieldTyVar]
-                   )
-                 `Ghc.mkVisFunTyMany`
-                   Ghc.mkTyVarTy xTyVar
-      fieldGenBndr = Ghc.mkLocalIdOrCoVar fieldGenName Ghc.Many fieldGenTy
-      initAccBndr = Ghc.mkLocalIdOrCoVar initAccName Ghc.Many (Ghc.mkTyVarTy accTyVar)
+
+  fieldGenBndr <- mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs
+
+  let initAccBndr = Ghc.mkLocalIdOrCoVar initAccName Ghc.Many (Ghc.mkTyVarTy accTyVar)
 
       accumulatorTy = Ghc.mkTyVarTy xTyVar
                     `Ghc.mkVisFunTyMany`
@@ -142,6 +121,48 @@ buildFoldFieldsExpr MkPluginInputs{..} ctLoc recordTy effectConTy predClass pred
 
       pure . Right $ Ghc.mkCoreLams lamArgs bodyExpr
     (wanteds, _) -> pure . Left $ concat wanteds
+
+-- | Make the binder for the function that produces the x terms
+mkFieldGenBndr
+  :: PluginInputs
+  -> Ghc.Type
+  -> Ghc.Class
+  -> Ghc.Type
+  -> Ghc.TyVar
+  -> [Ghc.Type]
+  -> Ghc.TcPluginM Ghc.Id
+mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs = do
+    fieldGenName <- Ghc.unsafeTcPluginTcM
+                  $ Ghc.newName (Ghc.mkOccName Ghc.varName "fieldGen")
+
+    fieldTyVarName <- Ghc.unsafeTcPluginTcM
+                    $ Ghc.newName (Ghc.mkOccName Ghc.varName "a")
+
+    let tyVar = Ghc.mkTyVar fieldTyVarName Ghc.liftedTypeKind
+        fieldTy = Ghc.mkTyConApp
+                    (fieldTyTyCon inp)
+                    [effectConTy, Ghc.mkTyVarTy tyVar]
+        -- forall a. (C (FieldTy f a)
+        --   => String
+        --   -> (HKD rec f -> FieldTy f a)
+        --   -> x
+        fieldGenTy = Ghc.mkSigmaTy forallBndrs preds tyBody
+          where
+            forallBndrs = [ Ghc.mkTyCoVarBinder Ghc.Required tyVar ]
+            preds = [ Ghc.mkClassPred predClass
+                        $ predArgs
+                       ++ [ fieldTy ]
+                    ]
+            tyBody = Ghc.stringTy
+                   `Ghc.mkVisFunTyMany`
+                     ( hkdTy
+                     `Ghc.mkVisFunTyMany`
+                       fieldTy
+                     )
+                   `Ghc.mkVisFunTyMany`
+                     Ghc.mkTyVarTy xTyVar
+
+    pure $ Ghc.mkLocalIdOrCoVar fieldGenName Ghc.Many fieldGenTy
 
 -- | The output of solving wanted contains references to variables that are not
 -- in scope so an expr must be constructed that binds those variables locally.

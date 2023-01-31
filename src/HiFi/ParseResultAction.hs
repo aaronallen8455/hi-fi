@@ -56,30 +56,39 @@ bufToByteString (Ghc.StringBuffer buf len cur) = BSI.PS buf cur len
 transformMkHKD :: Ghc.HsExpr Ghc.GhcPs -> Ghc.HsExpr Ghc.GhcPs
 transformMkHKD = \case
     Ghc.RecordUpd{..}
-      | checkExpr (Ghc.unLoc rupd_expr)
+      | Just rdrName <- checkExpr (Ghc.unLoc rupd_expr)
       , Left fields <- rupd_flds
       -> let fieldPairs = Ghc.getFieldPair . Ghc.unLoc <$> fields
-             tuple = mkTupleFromFields fieldPairs
+             mQualifier = extractQualifier rdrName
+             tuple = mkTupleFromFields mQualifier fieldPairs
           in Ghc.unLoc $ Ghc.nlHsApp rupd_expr tuple
     other -> other
   where
     checkExpr = \case
       Ghc.HsVar _ (Ghc.unLoc -> updVar)
         | Ghc.extractName updVar == Ghc.mkFastString "mkHKD"
-        -> True
+        -> Just updVar
       Ghc.HsPar' expr -> checkExpr $ Ghc.unLoc expr
       Ghc.HsAppType _ expr _ -> checkExpr $ Ghc.unLoc expr
-      _ -> False
+      _ -> Nothing
+
+extractQualifier :: Ghc.RdrName -> Maybe Ghc.ModuleName
+extractQualifier = fmap fst . Ghc.isQual_maybe
 
 mkTupleFromFields
-  :: [(Ghc.FastString, Ghc.HsExpr Ghc.GhcPs)]
+  :: Maybe Ghc.ModuleName
+  -> [(Ghc.FastString, Ghc.HsExpr Ghc.GhcPs)]
   -> Ghc.LHsExpr Ghc.GhcPs
-mkTupleFromFields [] = unitHsExpr
-mkTupleFromFields (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)) =
+mkTupleFromFields _ [] = unitHsExpr
+mkTupleFromFields mQualifier (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)) =
     Ghc.mkLHsTupleExpr
-      (mkTupleFromFields rest : map mkPairTuple fields)
+      (mkTupleFromFields mQualifier rest : map mkPairTuple fields)
       mempty
   where
+    mkRdrName ns =
+      case mQualifier of
+        Nothing -> Ghc.mkUnqual ns
+        Just qual -> \s -> Ghc.mkQual ns (Ghc.moduleNameFS qual, s)
     mkPairTuple (fieldName, expr) =
       Ghc.mkLHsTupleExpr
         [Ghc.noLocA $ mkFieldNameExpr fieldName, Ghc.noLocA expr]
@@ -89,7 +98,7 @@ mkTupleFromFields (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)) =
         Ghc.noSrcSpan
         (Ghc.noLocA $
           Ghc.HsVar Ghc.noExtField $
-            Ghc.L Ghc.noSrcSpanA . Ghc.mkUnqual Ghc.dataName $
+            Ghc.L Ghc.noSrcSpanA . mkRdrName Ghc.dataName $
               Ghc.mkFastString "MkFieldName"
         )
         (Ghc.HsWC Ghc.NoExtField . Ghc.noLocA $
@@ -108,12 +117,12 @@ mkTupleFromFields (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)) =
                else mkFieldNameExprDataKinds fieldName
           mkDataName name =
             Ghc.HsVar Ghc.noExtField $
-              Ghc.L Ghc.noSrcSpanA . Ghc.mkUnqual Ghc.dataName $
+              Ghc.L Ghc.noSrcSpanA . mkRdrName Ghc.dataName $
                 Ghc.mkFastString name
        in Ghc.HsApp
             Ghc.noComments
             (Ghc.noLocA . Ghc.HsVar Ghc.noExtField
-              . Ghc.L Ghc.noSrcSpanA . Ghc.mkUnqual Ghc.varName $
+              . Ghc.L Ghc.noSrcSpanA . mkRdrName Ghc.varName $
                   Ghc.mkFastString "toFieldName"
             )
             (Ghc.noLocA stringSing)

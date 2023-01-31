@@ -24,3 +24,6 @@ echo "data con out of scope passed"
 
 cabal exec cabal v2-run type-error-test/InScopeDataCon.hs
 echo "data con in scope passed"
+
+cabal exec cabal v2-run type-error-test/QualifiedImport.hs
+echo "qualified import passed"
