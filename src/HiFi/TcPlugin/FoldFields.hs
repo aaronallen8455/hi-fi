@@ -24,102 +24,21 @@ buildFoldFieldsExpr
   -> [(Ghc.FastString, FieldParts)]
   -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
 buildFoldFieldsExpr inp@MkPluginInputs{..} ctLoc recordTy effectConTy predClass predArgs fields = do
-  accTyVarName <- Ghc.unsafeTcPluginTcM
-                $ Ghc.newName (Ghc.mkOccName Ghc.varName "acc")
   xTyVarName <- Ghc.unsafeTcPluginTcM
               $ Ghc.newName (Ghc.mkOccName Ghc.varName "x")
-  accumulatorName <- Ghc.unsafeTcPluginTcM
-                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "accumulator")
-  initAccName <- Ghc.unsafeTcPluginTcM
-               $ Ghc.newName (Ghc.mkOccName Ghc.varName "initAcc")
-  hkdName <- Ghc.unsafeTcPluginTcM
-           $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
 
-  let accTyVar = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
-      xTyVar = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
+  let xTyVar = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
       hkdTy = Ghc.mkTyConApp hkdTyCon [recordTy, effectConTy]
 
   fieldGenBndr <- mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs
 
-  let initAccBndr = Ghc.mkLocalIdOrCoVar initAccName Ghc.Many (Ghc.mkTyVarTy accTyVar)
+  eFieldGenExprs <-
+    traverse
+      (mkFieldGenExpr inp fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recordTy)
+      fields
 
-      accumulatorTy = Ghc.mkTyVarTy xTyVar
-                    `Ghc.mkVisFunTyMany`
-                      Ghc.mkTyVarTy accTyVar
-                    `Ghc.mkVisFunTyMany`
-                      Ghc.mkTyVarTy accTyVar
-
-      accumulatorBndr = Ghc.mkLocalIdOrCoVar accumulatorName Ghc.Many accumulatorTy
-
-      accTyVarBndr = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
-      xTyVarBndr = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
-      hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
-
-  let mkFieldGenExpr
-        :: (Ghc.FastString, FieldParts)
-        -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
-      mkFieldGenExpr (fieldName, fieldParts) = do
-        fieldNameExpr <- Ghc.mkStringExprFS' fieldName
-        let getterExpr =
-              Ghc.mkCoreLams [hkdBndr] $
-                case fieldNesting fieldParts of
-                  Unnested idx ->
-                    Ghc.mkCoreApps (Ghc.Var indexArrayId)
-                                   [ Ghc.Type recordTy
-                                   , Ghc.Type effectConTy
-                                   , Ghc.Var hkdBndr
-                                   , Ghc.mkUncheckedIntExpr idx
-                                   ]
-                  Nested offset len innerRecTy _ ->
-                    Ghc.mkCoreApps (Ghc.Var getInnerRecId)
-                                   [ Ghc.Type recordTy
-                                   , Ghc.Type effectConTy
-                                   , Ghc.Type innerRecTy
-                                   , Ghc.Var hkdBndr
-                                   , Ghc.mkUncheckedIntExpr offset
-                                   , Ghc.mkUncheckedIntExpr len
-                                   ]
-            predClassArgs =
-              predArgs ++
-              [Ghc.mkTyConApp fieldTyTyCon [effectConTy, fieldType fieldParts]]
-
-        predCt <- makeWantedCt ctLoc predClass predClassArgs
-
-        (_, evBindMap)
-          <- Ghc.unsafeTcPluginTcM
-           . Ghc.runTcS
-           . Ghc.solveSimpleWanteds
-           $ Ghc.singleCt predCt
-
-        let evVar = Ghc.ctEvEvId $ Ghc.ctEvidence predCt
-        ePredDict <- buildEvExprFromMap ctLoc evVar evBindMap
-
-        pure $ ePredDict <&> \predDict ->
-          Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
-            [ Ghc.Type $ fieldType fieldParts
-            ] ++ [predDict] ++
-            [ fieldNameExpr
-            , getterExpr
-            ]
-
-      lamArgs = [ accTyVarBndr
-                , xTyVarBndr
-                , fieldGenBndr
-                , initAccBndr
-                , accumulatorBndr
-                ]
-
-  result <- traverse mkFieldGenExpr fields
-  case partitionEithers result of
-    ([], fieldGenExprs) -> do
-      bodyExpr <- Ghc.unsafeTcPluginTcM $
-        Ghc.mkFoldrExpr (Ghc.mkTyVarTy xTyVar)
-                        (Ghc.mkTyVarTy accTyVar)
-                        (Ghc.Var accumulatorBndr)
-                        (Ghc.Var initAccBndr)
-                        (Ghc.mkListExpr (Ghc.mkTyVarTy xTyVar) fieldGenExprs)
-
-      pure . Right $ Ghc.mkCoreLams lamArgs bodyExpr
+  case partitionEithers eFieldGenExprs of
+    ([], fieldGenExprs) -> Right <$> mkFoldFieldsExpr xTyVar fieldGenBndr fieldGenExprs
     (wanteds, _) -> pure . Left $ concat wanteds
 
 -- | Make the binder for the function that produces the x terms
@@ -163,6 +82,102 @@ mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs = do
                      Ghc.mkTyVarTy xTyVar
 
     pure $ Ghc.mkLocalIdOrCoVar fieldGenName Ghc.Many fieldGenTy
+
+-- | Make the expr that results from applying all arguments (including the dict)
+-- to the user supplied function that generates a value for each field.
+mkFieldGenExpr
+  :: PluginInputs
+  -> Ghc.Id
+  -> Ghc.Type
+  -> Ghc.CtLoc
+  -> Ghc.Class
+  -> [Ghc.Type]
+  -> Ghc.Type
+  -> Ghc.Type
+  -> (Ghc.FastString, FieldParts)
+  -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
+mkFieldGenExpr inp fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recordTy (fieldName, fieldParts) = do
+  hkdName <- Ghc.unsafeTcPluginTcM
+           $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
+  let hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
+      getterExpr =
+        Ghc.mkCoreLams [hkdBndr] $
+          case fieldNesting fieldParts of
+            Unnested idx ->
+              Ghc.mkCoreApps (Ghc.Var $ indexArrayId inp)
+                             [ Ghc.Type recordTy
+                             , Ghc.Type effectConTy
+                             , Ghc.Var hkdBndr
+                             , Ghc.mkUncheckedIntExpr idx
+                             ]
+            Nested offset len innerRecTy _ ->
+              Ghc.mkCoreApps (Ghc.Var $ getInnerRecId inp)
+                             [ Ghc.Type recordTy
+                             , Ghc.Type effectConTy
+                             , Ghc.Type innerRecTy
+                             , Ghc.Var hkdBndr
+                             , Ghc.mkUncheckedIntExpr offset
+                             , Ghc.mkUncheckedIntExpr len
+                             ]
+      predClassArgs =
+        predArgs ++
+        [Ghc.mkTyConApp (fieldTyTyCon inp) [effectConTy, fieldType fieldParts]]
+
+  predCt <- makeWantedCt ctLoc predClass predClassArgs
+
+  (_, evBindMap)
+    <- Ghc.unsafeTcPluginTcM
+     . Ghc.runTcS
+     . Ghc.solveSimpleWanteds
+     $ Ghc.singleCt predCt
+
+  let evVar = Ghc.ctEvEvId $ Ghc.ctEvidence predCt
+  ePredDict <- buildEvExprFromMap ctLoc evVar evBindMap
+  fieldNameExpr <- Ghc.mkStringExprFS' fieldName
+
+  pure $ ePredDict <&> \predDict ->
+    Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
+      [ Ghc.Type $ fieldType fieldParts
+      ] ++ [predDict] ++
+      [ fieldNameExpr
+      , getterExpr
+      ]
+
+-- | Puts the pieces together to form the resulting expr
+mkFoldFieldsExpr :: Ghc.TyVar -> Ghc.Id -> [Ghc.CoreExpr] -> Ghc.TcPluginM Ghc.CoreExpr
+mkFoldFieldsExpr xTyVar fieldGenBndr fieldGenExprs = do
+  initAccName <- Ghc.unsafeTcPluginTcM
+               $ Ghc.newName (Ghc.mkOccName Ghc.varName "initAcc")
+  accTyVarName <- Ghc.unsafeTcPluginTcM
+                $ Ghc.newName (Ghc.mkOccName Ghc.varName "acc")
+  accumulatorName <- Ghc.unsafeTcPluginTcM
+                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "accumulator")
+
+
+  let accumulatorTy = Ghc.mkTyVarTy xTyVar
+                    `Ghc.mkVisFunTyMany`
+                      Ghc.mkTyVarTy accTyVar
+                    `Ghc.mkVisFunTyMany`
+                      Ghc.mkTyVarTy accTyVar
+
+      accumulatorBndr = Ghc.mkLocalIdOrCoVar accumulatorName Ghc.Many accumulatorTy
+      accTyVar = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
+      initAccBndr = Ghc.mkLocalIdOrCoVar initAccName Ghc.Many (Ghc.mkTyVarTy accTyVar)
+      lamArgs = [ accTyVar
+                , xTyVar
+                , fieldGenBndr
+                , initAccBndr
+                , accumulatorBndr
+                ]
+
+  bodyExpr <- Ghc.unsafeTcPluginTcM $
+    Ghc.mkFoldrExpr (Ghc.mkTyVarTy xTyVar)
+                    (Ghc.mkTyVarTy accTyVar)
+                    (Ghc.Var accumulatorBndr)
+                    (Ghc.Var initAccBndr)
+                    (Ghc.mkListExpr (Ghc.mkTyVarTy xTyVar) fieldGenExprs)
+
+  pure $ Ghc.mkCoreLams lamArgs bodyExpr
 
 -- | The output of solving wanted contains references to variables that are not
 -- in scope so an expr must be constructed that binds those variables locally.
