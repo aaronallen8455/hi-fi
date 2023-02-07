@@ -11,32 +11,32 @@ import           HiFi
 main :: IO ()
 main = defaultMain
   [ bgroup "large record"
-    [ bench "fromRecord (hi-fi)" $ whnf fromRecordHiFi testRec
-    , bench "fromRecord (higgledy)" $ whnf fromRecordHiggledy testRec
-    , bench "toRecord (hi-fi)" $ whnf toRecordHiFi (fromRecord testRec)
-    , bench "toRecord (higgledy)" $ whnf toRecordHiggledy (Hig.deconstruct testRec)
+    [ bench "toHKD (hi-fi)" $ whnf toHKDHiFi testRec
+    , bench "toHKD (higgledy)" $ whnf toHKDHiggledy testRec
+    , bench "fromHKD (hi-fi)" $ whnf fromHKDHiFi (toHKD testRec)
+    , bench "fromHKD (higgledy)" $ whnf fromHKDHiggledy (Hig.deconstruct testRec)
     , bench "instantiate (hi-fi)" $ whnf instantiateHiFi 1
     , bench "instantiate (higgledy)" $ whnf instantiateHiggledy 1
-    , bench "getter (hi-fi)" $ whnf (\x -> x.t200) (fromRecord testRec)
-    , bench "getter (higgledy)" $ whnf (\x -> x ^. Hig.field @"t200") (fromRecordHiggledy testRec)
-    , bench "setter (hi-fi)" $ whnf (setField @"t200" 5) (fromRecord testRec)
-    , bench "setter (higgledy)" $ whnf (Hig.field @"t200" .~ 5) (fromRecordHiggledy testRec)
-    , bench "map effect (hi-fi)" $ whnf (hkdMap (Just . runIdentity)) (fromRecord testRec)
-    , bench "map effect (higgledy)" $ whnf (Hig.bmap (Just . runIdentity)) (fromRecordHiggledy testRec)
+    , bench "getter (hi-fi)" $ whnf (\x -> x.t200) (toHKD testRec)
+    , bench "getter (higgledy)" $ whnf (\x -> x ^. Hig.field @"t200") (toHKDHiggledy testRec)
+    , bench "setter (hi-fi)" $ whnf (setField @"t200" 5) (toHKD testRec)
+    , bench "setter (higgledy)" $ whnf (Hig.field @"t200" .~ 5) (toHKDHiggledy testRec)
+    , bench "map effect (hi-fi)" $ whnf (hkdMap (Just . runIdentity)) (toHKD testRec)
+    , bench "map effect (higgledy)" $ whnf (Hig.bmap (Just . runIdentity)) (toHKDHiggledy testRec)
     ]
   ]
 
-fromRecordHiFi :: Test -> HKD Test Identity
-fromRecordHiFi = fromRecord
+toHKDHiFi :: Test -> HKD Test Identity
+toHKDHiFi = toHKD
 
-fromRecordHiggledy :: Test -> Hig.HKD Test Identity
-fromRecordHiggledy = Hig.deconstruct
+toHKDHiggledy :: Test -> Hig.HKD Test Identity
+toHKDHiggledy = Hig.deconstruct
 
-toRecordHiFi :: HKD Test Identity -> Test
-toRecordHiFi = toRecord
+fromHKDHiFi :: HKD Test Identity -> Test
+fromHKDHiFi = fromHKD
 
-toRecordHiggledy :: Hig.HKD Test Identity -> Test
-toRecordHiggledy = runIdentity . Hig.construct
+fromHKDHiggledy :: Hig.HKD Test Identity -> Test
+fromHKDHiggledy = runIdentity . Hig.construct
 
 instantiateHiFi :: Int -> HKD Test Identity
 instantiateHiFi !x = mkHKD

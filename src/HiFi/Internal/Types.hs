@@ -1,3 +1,4 @@
+{-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE UndecidableSuperClasses #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
@@ -47,6 +48,7 @@ import qualified Text.ParserCombinators.ReadP as ReadP
 import qualified Text.ParserCombinators.ReadPrec as ReadPrec
 import           Unsafe.Coerce (unsafeCoerce)
 
+type role HKD representational representational
 type HKD :: Type -> (Type -> Type) -> Type
 newtype HKD rec f =
   UnsafeMkHKD (A.Array (f Exts.Any))

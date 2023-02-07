@@ -10,21 +10,25 @@ module HiFi.Api
   , hkdCotraverse
   , hkdZipWith
   , hkdPure
-  , toRecord
-  , fromRecord
+  , fromHKD
+  , toHKD
   , mkHKD
   , setField
   , getField
   , fill
   , fillC
-  , fillCWithName
+  , withInstances
   , atField
-  , hkdUpdate
+  , hkdApplyUpdate
   , StringSing(..)
   , toFieldName
   , NestHKD(..)
   , ToHkdFields(..)
   , FoldFields(..)
+  , FieldTy
+  , ToRecord
+  , FieldGetters
+  , WithHkdFields
   ) where
 
 import           Control.Applicative (liftA2)
@@ -52,7 +56,7 @@ hkdSequenceShallow :: forall f g rec. Applicative f
 hkdSequenceShallow (UnsafeMkHKD arr) = UnsafeMkHKD <$> traverse coerce arr
 
 hkdSequence :: forall f rec. (Applicative f, ToRecord rec) => HKD rec f -> f rec
-hkdSequence = fmap toRecord
+hkdSequence = fmap fromHKD
             . hkdSequenceShallow @f @Identity
             . hkdMap (coerce . fmap Identity)
 
@@ -97,17 +101,17 @@ hkdZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ d
   [ f (A.indexArray a i) (A.indexArray b i) ]
 
 hkdPure :: (Applicative f, FieldGetters rec) => rec -> HKD rec f
-hkdPure = hkdMap (pure . coerce) . fromRecord
+hkdPure = hkdMap (pure . coerce) . toHKD
 
-toRecord :: ToRecord rec => HKD rec Identity -> rec
-toRecord = toRecord' . coerce
+fromHKD :: ToRecord rec => HKD rec Identity -> rec
+fromHKD = toRecord' . coerce
 
 -- This function must be inlined, otherwise it behaves incorrectly with >O0
-{-# INLINE fromRecord #-}
-fromRecord :: forall rec. FieldGetters rec => rec -> HKD rec Identity
-fromRecord rec =
+{-# INLINE toHKD #-}
+toHKD :: forall rec. FieldGetters rec => rec -> HKD rec Identity
+toHKD rec =
   let getters = fieldGetters @rec
-   in UnsafeMkHKD $ A.createArray (length getters) (error "fromRecord: impossible") $ \arr -> do
+   in UnsafeMkHKD $ A.createArray (length getters) (error "toHKD: impossible") $ \arr -> do
     let go !ix (x:xs) = do
           A.writeArray arr ix (coerce $ x rec)
           go (ix + 1) xs
@@ -118,7 +122,7 @@ mkHKD :: forall rec f tuple. (Instantiate rec f tuple) => tuple -> HKD rec f
 mkHKD = instantiate @rec @f @tuple
 
 setField
-  :: forall name rec a f
+  :: forall name rec f a
    . (HasField name rec a, HkdSetField name rec f a)
   => FieldTy f a
   -> HKD rec f
@@ -129,28 +133,37 @@ setField = hkdSetField @name @rec @f @a
 fill :: forall rec f. FieldGetters rec => (forall a. f a) -> HKD rec f
 fill x = UnsafeMkHKD . A.arrayFromList $ unsafeCoerce x <$ fieldGetters @rec
 
-fillC
-  :: forall c f rec
-   . (Applicative f, FoldFields (WithHkdFields c Identity) rec Identity)
-  => (forall a. c a => f a)
-  -> f (HKD rec Identity)
-fillC fa = fillCWithName @c (const fa)
+fillC :: forall c rec f
+       . (Applicative f, FoldFields (WithHkdFields c Identity) rec Identity)
+      => (forall a. c a => f a)
+      -> f (HKD rec Identity)
+fillC fa = withInstances @c (\_ _ -> fa)
 
-fillCWithName
-  :: forall c f rec
-   . (Applicative f, FoldFields (WithHkdFields c Identity) rec Identity)
-  => (forall a. c a => String -> f a)
-  -> f (HKD rec Identity)
-fillCWithName fa =
-  let go :: forall a. (c (FieldTy Identity a), ToHkdFields Identity (FieldTy Identity a))
+-- | Accepts a handler that is invoked for each field of the record, providing
+-- an instance of the given class as along with the field name and a getter in
+-- order to construct a result. The results from each field are then aggregated
+-- to form a complete record in HKD form.
+--
+-- This can be used to implement some type classes in a record generic way.
+withInstances
+  :: forall c f g rec
+   . (Applicative f, FoldFields (WithHkdFields c g) rec g)
+  => (forall a. c (FieldTy g a)
+        => String -- ^ field name
+        -> (HKD rec g -> FieldTy g a) -- ^ getter
+        -> f (FieldTy g a)
+     )
+  -> f (HKD rec g)
+withInstances k =
+  let go :: forall a. (c (FieldTy g a), ToHkdFields g (FieldTy g a))
          => String
-         -> (HKD rec Identity -> FieldTy Identity a)
-         -> f [Identity Exts.Any]
-      go name _ = toHkdFields <$> fa @(FieldTy Identity a) name
+         -> (HKD rec g -> FieldTy g a)
+         -> f [g Exts.Any]
+      go name getter = toHkdFields <$> k @a name getter
    in coerce . A.arrayFromList <$>
-        foldFields @(WithHkdFields c Identity) @rec @Identity
+        foldFields @(WithHkdFields c g) @rec @g
           go
-          (pure [] :: f [Identity Exts.Any])
+          (pure [] :: f [g Exts.Any])
           (liftA2 (++))
 
 -- | A lens focusing a specific field in a HKD.
@@ -165,6 +178,6 @@ atField :: forall (name :: Symbol) rec effect f a
 atField afa rec =
   flip (setField @name) rec <$> afa (getField @name rec)
 
-hkdUpdate :: (ToRecord rec, FieldGetters rec) => HKD rec Maybe -> rec -> rec
-hkdUpdate upd rec =
-  toRecord $ hkdZipWith (\m i -> maybe i coerce m) upd (fromRecord rec)
+hkdApplyUpdate :: (ToRecord rec, FieldGetters rec) => HKD rec Maybe -> rec -> rec
+hkdApplyUpdate upd rec =
+  fromHKD $ hkdZipWith (\m i -> maybe i coerce m) upd (toHKD rec)

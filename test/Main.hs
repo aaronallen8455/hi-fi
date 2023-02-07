@@ -53,11 +53,11 @@ tests = testGroup "tests"
 tripRecord :: Property
 tripRecord =
   forAll
-    (arbitrary @Test1) $ \x -> x === toRecord (fromRecord x)
+    (arbitrary @Test1) $ \x -> x === fromHKD (toHKD x)
 
 testGetters :: Assertion
 testGetters = do
-  let hkd = fromRecord testInput1
+  let hkd = toHKD testInput1
   Identity testInput1.t1a @=? hkd.t1a
   Identity testInput1.t1b @=? hkd.t1b
   Identity testInput1.t1c @=? hkd.t1c
@@ -71,9 +71,9 @@ testSetters = do
           . setField @"t1c" (Identity 5.1)
           . setField @"t1d" (Identity (-9.1))
           . setField @"t1e" (Identity (UnicodeString "dsa"))
-          $ fromRecord testInput1
+          $ toHKD testInput1
   Test1 False 2 5.1 (-9.1) (UnicodeString "dsa")
-    @=? toRecord hkd
+    @=? fromHKD hkd
 
 testSequence :: Assertion
 testSequence = do
@@ -115,7 +115,7 @@ testLiterals = do
                   , t1d = 5
                   , t1e = UnicodeString "hello"
                   }
-  rec @=? toRecord hkd
+  rec @=? fromHKD hkd
 
 testParameterized :: Assertion
 testParameterized = do
@@ -400,7 +400,7 @@ testLargeRecord = do
 
 testEffectMap :: Assertion
 testEffectMap = do
-  let hkd = hkdMap (Just . runIdentity) $ fromRecord testInput1
+  let hkd = hkdMap (Just . runIdentity) $ toHKD testInput1
   Just testInput1 @=? hkdSequence hkd
 
 testZipping :: Assertion
@@ -412,9 +412,9 @@ testZipping = do
                   , t1d = Just 9.99
                   , t1e = Just $ UnicodeString "cde"
                   }
-      new = hkdZipWith (`maybe` Identity) (fromRecord testInput1) upd
+      new = hkdZipWith (`maybe` Identity) (toHKD testInput1) upd
       expected = testInput1 { t1a = False, t1d = 9.99, t1e = "cde" }
-  show expected @=? show (toRecord new)
+  show expected @=? show (fromHKD new)
 
 testFill :: Assertion
 testFill = do
@@ -425,23 +425,23 @@ testEq :: Property
 testEq =
   forAll (arbitrary @Test1) $ \x ->
     forAll arbitrary $ \y ->
-      (x == y) === (fromRecord x == fromRecord y)
+      (x == y) === (toHKD x == toHKD y)
 
 testOrd :: Property
 testOrd =
   forAll (arbitrary @Test1) $ \x ->
     forAll arbitrary $ \y ->
-      compare x y === compare (fromRecord x) (fromRecord y)
+      compare x y === compare (toHKD x) (toHKD y)
 
 testShowRead :: Property
 testShowRead =
   forAll (arbitrary @Test1) $ \x ->
-    x === toRecord (read (show $ fromRecord x))
+    x === fromHKD (read (show $ toHKD x))
 
 testShowReadSingle :: Property
 testShowReadSingle =
   forAll (arbitrary @Test5) $ \x ->
-    x === toRecord (read (show $ fromRecord x))
+    x === fromHKD (read (show $ toHKD x))
 
 testDistribute :: Assertion
 testDistribute = do
@@ -510,7 +510,7 @@ testInstantiationNested = do
 testTripNested :: Property
 testTripNested =
   forAll (arbitrary @Test6) $ \x ->
-    x === toRecord (fromRecord x)
+    x === fromHKD (toHKD x)
 
 testSetterNested :: Assertion
 testSetterNested = do
@@ -554,14 +554,14 @@ data Test2 = Test2
   } deriving (Eq, Show)
 
 instance Arbitrary (HKD Test2 Identity) where
-  arbitrary = fromRecord <$> hkdSequence mkHKD
+  arbitrary = toHKD <$> hkdSequence mkHKD
     { t2a = arbitrary
     , t2b = arbitrary
     , t2c = arbitrary
     }
 
 instance Arbitrary Test2 where
-  arbitrary = toRecord <$> fillC @Arbitrary arbitrary
+  arbitrary = fromHKD <$> fillC @Arbitrary arbitrary
 
 data Test3 a b = Test3
   { t3a :: a
@@ -794,7 +794,7 @@ data Test7 r = Test7
   }
 
 instance Arbitrary (HKD (Test7 Test2) Identity) where
-  arbitrary = fromRecord <$> hkdSequence mkHKD
+  arbitrary = toHKD <$> hkdSequence mkHKD
     { t71 = arbitrary
     , t72 = hkdDistribute arbitrary
     , t73 = arbitrary
@@ -807,9 +807,9 @@ data Test8 a b = Test8
   }
 
 instance Arbitrary (HKD (Test8 (Test7 Test2) Test2) Identity) where
-  arbitrary = fromRecord <$> hkdSequence mkHKD
+  arbitrary = toHKD <$> hkdSequence mkHKD
     { t81 = arbitrary
-    , t82 = hkdDistribute $ toRecord <$> arbitrary
+    , t82 = hkdDistribute $ fromHKD <$> arbitrary
     , t83 = hkdDistribute arbitrary
     }
 
