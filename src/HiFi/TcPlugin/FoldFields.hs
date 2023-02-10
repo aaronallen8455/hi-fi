@@ -193,11 +193,10 @@ buildEvExprFromMap ctLoc evVar evBindMap = do
   mResult <- case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
     ([m], rest) -> Ghc.unsafeTcPluginTcM . Ghc.initDsTc' $ do
       baseDict <- Ghc.dsEvTerm $ Ghc.eb_rhs m
-      let go :: Ghc.EvExpr -> Ghc.EvBind -> Ghc.DsM Ghc.EvExpr
-          go acc x = do
-            evExpr <- Ghc.dsEvTerm $ Ghc.eb_rhs x
-            pure $ Ghc.bindNonRec (Ghc.eb_lhs x) evExpr acc
-       in foldM go baseDict rest
+      binds <- forM rest $ \evBind -> do
+        evExpr <- Ghc.dsEvTerm $ Ghc.eb_rhs evBind
+        pure (Ghc.eb_lhs evBind, evExpr)
+      pure $ Ghc.mkLetRec binds baseDict
     _ -> pure Nothing
   case mResult of
         Nothing -> do

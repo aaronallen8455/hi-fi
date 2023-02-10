@@ -178,7 +178,7 @@ Foo <$> expr1
     ...
 ```
 This idiom has a number of down-sides:
-- It looks bizzare to the uninitiated.
+- It looks bizarre to the uninitiated.
 - You must know the order of fields in the record to tell which expression is
   mapping to which field. It's a common mistake to get the ordering wrong, which
   won't be caught at compile time if the fields are of the same type.
@@ -205,11 +205,14 @@ GHC's internal representation in order to work with records in ways that are
 not normally possible without meta programming techniques such as generics or
 template haskell.
 
-As an example, let's see how `hi-fi` can be used to implement the `FromNamedRecord`
-type class from the `cassava` library in a record generic way.
+As an example, let's see how `hi-fi` can be used to implement the
+`FromNamedRecord` and `ToNamedRecord` type classes from the `cassava` library
+in a record generic way.
 
 ```haskell
 import qualified Data.Csv as Csv
+import           Data.Functor.Identity
+import           Data.Functor.Const
 import qualified HiFi
 
 newtype HkdCsv record = MkHkdCsv record
@@ -223,11 +226,23 @@ instance ( HiFi.FoldFields (HiFi.WithHkdFields Csv.FromField Identity) record Id
      in MkHkdCsv . HiFi.fromHKD
           <$> HiFi.withInstances @Csv.FromField lookupField
 
+instance ( HiFi.FoldFields (HiFi.WithHkdFields Csv.ToField Identity) record Identity
+         , HiFi.FieldGetters record
+         )
+    => Csv.ToNamedRecord (HkdCsv record) where
+  toNamedRecord (MkHkdCsv rec) =
+    let hkd = toHKD rec
+        mkField fieldName getter =
+          Const [ Csv.namedField (fromString fieldName) (getter hkd) ]
+     in Csv.namedRecord . getConst
+          $ HiFi.withInstances @Csv.ToField mkField
+
 data Person =
   MkPerson
     { name :: String
     , age :: Int
     } deriving Csv.FromNamedRecord via (HkdCsv Person)
+      deriving Csv.ToNamedRecord via (HkdCsv Person)
 ```
 
 ### Nested Records
@@ -235,7 +250,7 @@ data Person =
 It's possible to have a record as a field in another record and have the inner
 record promoted to its higher kinded data version along with the parent record.
 This is done using the `NestHKD` type, which is a newtype wrapper akin to
-`Identity` from `Data.Functor.Identity`.
+`Data.Functor.Identity`.
 
 ```haskell
 data Outer = Outer
@@ -255,3 +270,10 @@ hkd = mkHKD
   , bar = Nothing
   }
 ```
+
+### Limitations
+- Currently supports GHC 9.2.x and 9.4.x
+- Records must follow certain rules to be promotable to HKDs:
+  - Nested records cannot result in inifinite recursion
+  - Types of nested records cannot be type family applications
+  - Existential type variables or constraint contexts are not allowed

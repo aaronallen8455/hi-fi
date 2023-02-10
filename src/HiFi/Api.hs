@@ -9,6 +9,7 @@ module HiFi.Api
   , hkdTraverse
   , hkdCotraverse
   , hkdZipWith
+  , hkdZipWith3
   , hkdPure
   , fromHKD
   , toHKD
@@ -35,6 +36,7 @@ import           Control.Applicative (liftA2)
 import           Data.Coerce (coerce)
 import           Data.Functor.Compose (Compose(..))
 import           Data.Functor.Identity (Identity(..))
+import           Data.Functor.Product (Product(..))
 import qualified Data.Primitive.Array as A
 import qualified GHC.Exts as Exts
 import           GHC.Records
@@ -99,6 +101,16 @@ hkdZipWith
 hkdZipWith f (UnsafeMkHKD a) (UnsafeMkHKD b) = UnsafeMkHKD . A.arrayFromList $ do
   i <- [0 .. A.sizeofArray a - 1]
   [ f (A.indexArray a i) (A.indexArray b i) ]
+
+hkdZipWith3
+  :: (forall a. f a -> g a -> h a -> i a)
+  -> HKD rec f
+  -> HKD rec g
+  -> HKD rec h
+  -> HKD rec i
+hkdZipWith3 f fa ga ha =
+  hkdZipWith (\a (Pair b c) -> f a b c) fa
+  $ hkdZipWith Pair ga ha
 
 hkdPure :: (Applicative f, FieldGetters rec) => rec -> HKD rec f
 hkdPure = hkdMap (pure . coerce) . toHKD
