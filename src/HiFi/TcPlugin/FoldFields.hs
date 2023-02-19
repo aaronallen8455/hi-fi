@@ -6,7 +6,6 @@ module HiFi.TcPlugin.FoldFields
 import           Control.Monad
 import           Data.Either
 import           Data.Functor ((<&>))
-import qualified Data.List as List
 import           Data.Maybe
 
 import qualified HiFi.GhcFacade as Ghc
@@ -16,6 +15,8 @@ import           HiFi.TcPlugin.Utils (makeWantedCt)
 
 buildFoldFieldsExpr
   :: PluginInputs
+  -> Ghc.EvBindsVar
+  -> [Ghc.Ct]
   -> Ghc.CtLoc
   -> Ghc.Type
   -> Ghc.Type
@@ -23,7 +24,7 @@ buildFoldFieldsExpr
   -> [Ghc.Type]
   -> [(Ghc.FastString, FieldParts)]
   -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
-buildFoldFieldsExpr inp@MkPluginInputs{..} ctLoc recordTy effectConTy predClass predArgs fields = do
+buildFoldFieldsExpr inp@MkPluginInputs{..} evBindsVar givens ctLoc recordTy effectConTy predClass predArgs fields = do
   xTyVarName <- Ghc.unsafeTcPluginTcM
               $ Ghc.newName (Ghc.mkOccName Ghc.varName "x")
 
@@ -34,7 +35,18 @@ buildFoldFieldsExpr inp@MkPluginInputs{..} ctLoc recordTy effectConTy predClass 
 
   eFieldGenExprs <-
     traverse
-      (mkFieldGenExpr inp fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recordTy)
+      (mkFieldGenExpr
+        inp
+        evBindsVar
+        givens
+        fieldGenBndr
+        hkdTy
+        ctLoc
+        predClass
+        predArgs
+        effectConTy
+        recordTy
+      )
       fields
 
   case partitionEithers eFieldGenExprs of
@@ -87,6 +99,8 @@ mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs = do
 -- to the user supplied function that generates a value for each field.
 mkFieldGenExpr
   :: PluginInputs
+  -> Ghc.EvBindsVar
+  -> [Ghc.Ct]
   -> Ghc.Id
   -> Ghc.Type
   -> Ghc.CtLoc
@@ -96,7 +110,7 @@ mkFieldGenExpr
   -> Ghc.Type
   -> (Ghc.FastString, FieldParts)
   -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.CoreExpr)
-mkFieldGenExpr inp fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recordTy (fieldName, fieldParts) = do
+mkFieldGenExpr inp evBindsVar givens fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recordTy (fieldName, fieldParts) = do
   hkdName <- Ghc.unsafeTcPluginTcM
            $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
 
@@ -124,17 +138,32 @@ mkFieldGenExpr inp fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recor
         predArgs ++
         [Ghc.mkTyConApp (fieldTyTyCon inp) [effectConTy, fieldType fieldParts]]
 
-  predCt <- makeWantedCt ctLoc predClass predClassArgs
+  (predCt, predDest) <- makeWantedCt ctLoc predClass predClassArgs
 
-  (_, evBindMap)
-    <- Ghc.unsafeTcPluginTcM
-     . Ghc.runTcS
-     . Ghc.solveSimpleWanteds
-     $ Ghc.singleCt predCt
-
-  let evVar = Ghc.ctEvEvId $ Ghc.ctEvidence predCt
-  ePredDict <- buildEvExprFromMap ctLoc evVar evBindMap
   fieldNameExpr <- Ghc.mkStringExprFS' fieldName
+
+  ePredDict <- do
+    Ghc.unsafeTcPluginTcM . Ghc.runTcSWithEvBinds evBindsVar $ do
+      -- Add givens back in
+      Ghc.solveSimpleGivens givens
+      -- Try to solve the constraint with both top level instances and givens
+      void $ Ghc.solveSimpleWanteds (Ghc.singleCt predCt)
+    -- Check if GHC produced evidence
+    mEvTerm <- Ghc.unsafeTcPluginTcM $ lookupEvTerm evBindsVar predDest
+    case mEvTerm of
+      Just (Ghc.EvExpr evExpr) -> do
+        evBindsMap <- Ghc.unsafeTcPluginTcM $ Ghc.getTcEvBindsMap evBindsVar
+        let freeVars =
+              filter (\x -> not (isDFunId x)
+                         || isNothing (Ghc.lookupEvBind evBindsMap x)
+                     )
+                     $ Ghc.exprFreeVarsList evExpr
+        if null freeVars
+           then pure $ Right evExpr
+           else do
+             mCts <- traverse (mkNewWantedFromExpr ctLoc) freeVars
+             pure . Left $ catMaybes mCts
+      _ -> pure $ Left [predCt]
 
   pure $ ePredDict <&> \predDict ->
     Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
@@ -180,37 +209,6 @@ mkFoldFieldsExpr xTyVar fieldGenBndr fieldGenExprs = do
 
   pure $ Ghc.mkCoreLams lamArgs bodyExpr
 
--- | The output of solving wanted contains references to variables that are not
--- in scope so an expr must be constructed that binds those variables locally.
-buildEvExprFromMap
-  :: Ghc.CtLoc
-  -> Ghc.EvVar
-  -> Ghc.EvBindMap
-  -> Ghc.TcPluginM (Either [Ghc.Ct] Ghc.EvExpr)
-buildEvExprFromMap ctLoc evVar evBindMap = do
-  let evBinds = Ghc.dVarEnvElts $ Ghc.ev_bind_varenv evBindMap
-  mResult <- case List.partition ((== evVar) . Ghc.eb_lhs) evBinds of
-    ([m], rest) -> Ghc.unsafeTcPluginTcM . Ghc.initDsTc' $ do
-      baseDict <- Ghc.dsEvTerm $ Ghc.eb_rhs m
-      binds <- forM rest $ \evBind -> do
-        evExpr <- Ghc.dsEvTerm $ Ghc.eb_rhs evBind
-        pure (Ghc.eb_lhs evBind, evExpr)
-      pure $ Ghc.mkLetRec binds baseDict
-    _ -> pure Nothing
-  case mResult of
-        Nothing -> do
-          mCt <- mkNewWantedFromExpr ctLoc evVar
-          pure . Left $ maybeToList mCt
-        Just result -> do
-          -- Filter out DFunId vars, which are valid even though they are
-          -- considered free vars by GHC.
-          let freeVars = filter (not . isDFunId) $ Ghc.exprFreeVarsList result
-          if null freeVars
-             then pure $ Right result
-             else do
-               mCts <- traverse (mkNewWantedFromExpr ctLoc) freeVars
-               pure . Left $ catMaybes mCts
-
 isDFunId :: Ghc.EvVar -> Bool
 isDFunId var =
   Ghc.isId var &&
@@ -226,5 +224,24 @@ mkNewWantedFromExpr ctLoc evVar
   | let exprTy = Ghc.exprType (Ghc.Var evVar)
   , Just (tyCon, args) <- Ghc.tcSplitTyConApp_maybe exprTy
   , Just cls <- Ghc.tyConClass_maybe tyCon
-  = Just <$> makeWantedCt ctLoc cls args
+  = Just . fst <$> makeWantedCt ctLoc cls args
   | otherwise = pure Nothing
+
+-- | Look up whether a 'TcEvDest' has been filled with evidence.
+lookupEvTerm
+  :: Ghc.EvBindsVar
+  -> Ghc.TcEvDest
+  -> Ghc.TcM (Maybe Ghc.EvTerm)
+lookupEvTerm _ (Ghc.HoleDest (Ghc.CoercionHole { Ghc.ch_ref = ref } ) ) = do
+  mb_co <- Ghc.readTcRef ref
+  case mb_co of
+    Nothing -> pure Nothing
+    Just co -> pure . Just $ Ghc.evCoercion co
+lookupEvTerm evBindsVar (Ghc.EvVarDest ev_var) = do
+  evBindsMap <- Ghc.getTcEvBindsMap evBindsVar
+  let
+    mEvBind :: Maybe Ghc.EvBind
+    mEvBind = Ghc.lookupEvBind evBindsMap ev_var
+  case mEvBind of
+    Nothing     -> pure Nothing
+    Just evBind -> pure . Just $ Ghc.eb_rhs evBind

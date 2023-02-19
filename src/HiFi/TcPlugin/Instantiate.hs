@@ -181,20 +181,20 @@ mkFieldTypeCheckWanteds inp ctLoc recTy recordFieldMap tuplePairs effectCon = do
               ctLocWithFieldName = ctLoc
                 { Ghc.ctl_origin = Ghc.HasFieldOrigin labelFs
                 }
-          makeWantedCt ctLocWithFieldName (fieldTypeCheckClass inp) classArgs
+          fst <$> makeWantedCt ctLocWithFieldName (fieldTypeCheckClass inp) classArgs
 
         Missing labelFs -> do
           let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
               classArgs = [ fieldNameTy
                           , recTy
                           ]
-          makeWantedCt ctLoc (missingFieldClass inp) classArgs
+          fst <$> makeWantedCt ctLoc (missingFieldClass inp) classArgs
         Extra labelFs -> do
           let fieldNameTy = Ghc.LitTy $ Ghc.StrTyLit labelFs
               classArgs = [ fieldNameTy
                           , recTy
                           ]
-          makeWantedCt ctLoc (unknownFieldClass inp) classArgs
+          fst <$> makeWantedCt ctLoc (unknownFieldClass inp) classArgs
   traverse go $ Ghc.nonDetEltsUFM matchResults
 
 data LabelMatchResult

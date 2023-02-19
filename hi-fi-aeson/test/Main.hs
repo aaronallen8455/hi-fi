@@ -28,7 +28,7 @@ data Test1 = Test1
   { t11 :: Bool
   , t12 :: Int
   , t13 :: [Double]
-  -- , t14 :: NestHKD Test2
+  , t14 :: Test2
   } deriving (Show, Eq)
     deriving (FromJSON, ToJSON) via HkdJSON "Test1" Test1
 

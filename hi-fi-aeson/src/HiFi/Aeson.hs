@@ -49,7 +49,6 @@ instance ( KnownSymbol name
             Nothing -> o .: fromString fieldName
             Just Refl -> Identity <$> o .:? fromString fieldName
      in HkdJSON . fromHKD <$> withInstances @(FromJSON `And` Typeable) go
-  {-# INLINE parseJSON #-}
 
 instance (FoldFields (WithHkdFields ToJSON Identity) rec Identity, FieldGetters rec)
     => ToJSON (HkdJSON name rec) where
@@ -62,7 +61,6 @@ instance (FoldFields (WithHkdFields ToJSON Identity) rec Identity, FieldGetters 
         go fieldName getter =
           Const [((.=) @Pair @(FieldTy Identity a)) (fromString fieldName) (getter hkd)]
      in object . getConst $ withInstances @ToJSON go
-  {-# INLINE toJSON #-}
   toEncoding (HkdJSON rec) =
     let hkd = toHKD rec
         go :: forall a. ToJSON (FieldTy Identity a)
@@ -72,4 +70,16 @@ instance (FoldFields (WithHkdFields ToJSON Identity) rec Identity, FieldGetters 
         go fieldName getter =
           Const $ ((.=) @Series @(FieldTy Identity a)) (fromString fieldName) (getter hkd)
      in pairs . getConst $ withInstances @ToJSON go
-  {-# INLINE toEncoding #-}
+
+data O = O
+  { f11 :: Bool
+  , f12 :: Two
+  } deriving (ToJSON, FromJSON) via HkdJSON "O" O
+
+showHkd :: O -> String
+showHkd = show . toHKD
+
+data Two = Two
+  { f21 :: String
+  , f22 :: Bool
+  } deriving (ToJSON, FromJSON) via HkdJSON "Two" Two

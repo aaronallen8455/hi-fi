@@ -40,8 +40,8 @@ import           GHC.Tc.Utils.TcType as Ghc
 import           GHC.Builtin.Names as Ghc
 import           GHC.Core.InstEnv as Ghc
 import           GHC.Tc.Instance.Class as Ghc
-import           GHC.Tc.Solver.Monad as Ghc (runTcS)
-import           GHC.Tc.Solver.Interact as Ghc (solveSimpleWanteds)
+import           GHC.Tc.Solver.Monad as Ghc (runTcS, TcS, runTcSWithEvBinds)
+import           GHC.Tc.Solver.Interact as Ghc (solveSimpleWanteds, solveSimpleGivens)
 import           GHC.Settings.Constants as Ghc
 import           GHC.Data.StringBuffer as Ghc
 import           GHC.HsToCore.Binds as Ghc
@@ -76,8 +76,8 @@ import           GHC.Tc.Utils.TcType as Ghc
 import           GHC.Builtin.Names as Ghc
 import           GHC.Core.InstEnv as Ghc
 import           GHC.Tc.Instance.Class as Ghc
-import           GHC.Tc.Solver.Monad as Ghc (runTcS)
-import           GHC.Tc.Solver.Interact as Ghc (solveSimpleWanteds)
+import           GHC.Tc.Solver.Monad as Ghc (runTcS, TcS, runTcSWithEvBinds)
+import           GHC.Tc.Solver.Interact as Ghc (solveSimpleWanteds, solveSimpleGivens)
 import           GHC.Settings.Constants as Ghc
 import           GHC.Data.StringBuffer as Ghc
 import           GHC.HsToCore.Binds as Ghc

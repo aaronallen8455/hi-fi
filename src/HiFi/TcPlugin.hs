@@ -32,7 +32,7 @@ tcPlugin = Ghc.TcPlugin
   }
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
-tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
+tcSolver inp@MkPluginInputs{..} env givens wanteds = do
   results <- for wanteds $ \case
     ct@Ghc.CDictCan{ cc_class, cc_tyargs } -> do
       let clsName = Ghc.getName cc_class
@@ -72,6 +72,8 @@ tcSolver inp@MkPluginInputs{..} _env _givens wanteds = do
               result
                 <- buildFoldFieldsExpr
                      inp
+                     env
+                     givens
                      (Ghc.ctLoc ct)
                      recordTy
                      effectConTy
@@ -174,10 +176,10 @@ guardSupportedRecord inp recordTy ct k =
         Left (UnsupportedTy ty) -> do
           -- use the place holder evidence for the wanted constraint so that the
           -- desired error message will be displayed.
-          newWanted <- makeWantedCt (Ghc.ctLoc ct) (unsupportedRecordClass inp) [ty]
+          newWanted <- fst <$> makeWantedCt (Ghc.ctLoc ct) (unsupportedRecordClass inp) [ty]
           pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
         Left (DataConNotInScope dataCon) -> do
-          newWanted <- makeWantedCt (Ghc.ctLoc ct) (dataConNotInScopeClass inp)
+          newWanted <- fst <$> makeWantedCt (Ghc.ctLoc ct) (dataConNotInScopeClass inp)
                          [Ghc.mkTyConTy $ Ghc.promoteDataCon dataCon]
           pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
         Right recParts -> k recParts
