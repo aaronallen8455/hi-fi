@@ -70,16 +70,3 @@ instance (FoldFields (WithHkdFields ToJSON Identity) rec Identity, FieldGetters 
         go fieldName getter =
           Const $ ((.=) @Series @(FieldTy Identity a)) (fromString fieldName) (getter hkd)
      in pairs . getConst $ withInstances @ToJSON go
-
-data O = O
-  { f11 :: Bool
-  , f12 :: Two
-  } deriving (ToJSON, FromJSON) via HkdJSON "O" O
-
-showHkd :: O -> String
-showHkd = show . toHKD
-
-data Two = Two
-  { f21 :: String
-  , f22 :: Bool
-  } deriving (ToJSON, FromJSON) via HkdJSON "Two" Two

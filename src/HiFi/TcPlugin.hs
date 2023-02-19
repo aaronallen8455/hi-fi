@@ -32,7 +32,7 @@ tcPlugin = Ghc.TcPlugin
   }
 
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
-tcSolver inp@MkPluginInputs{..} env givens wanteds = do
+tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
   results <- for wanteds $ \case
     ct@Ghc.CDictCan{ cc_class, cc_tyargs } -> do
       let clsName = Ghc.getName cc_class

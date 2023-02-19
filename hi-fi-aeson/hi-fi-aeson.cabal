@@ -26,7 +26,7 @@ library
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.17.0.0,
+    build-depends:    base,
                       hi-fi,
                       aeson
 
@@ -61,7 +61,7 @@ test-suite hi-fi-aeson-test
 
     -- Test dependencies.
     build-depends:
-        base ^>=4.17.0.0,
+        base,
         hi-fi,
         hi-fi-aeson,
         aeson,

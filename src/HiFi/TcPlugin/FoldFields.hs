@@ -3,10 +3,8 @@ module HiFi.TcPlugin.FoldFields
   ( buildFoldFieldsExpr
   ) where
 
-import           Control.Monad
 import           Data.Either
 import           Data.Functor ((<&>))
-import           Data.Maybe
 
 import qualified HiFi.GhcFacade as Ghc
 import           HiFi.TcPlugin.PluginInputs
@@ -140,30 +138,9 @@ mkFieldGenExpr inp evBindsVar givens fieldGenBndr hkdTy ctLoc predClass predArgs
 
   (predCt, predDest) <- makeWantedCt ctLoc predClass predClassArgs
 
-  fieldNameExpr <- Ghc.mkStringExprFS' fieldName
+  ePredDict <- Ghc.unsafeTcPluginTcM $ solvePred evBindsVar givens predCt predDest
 
-  ePredDict <- do
-    Ghc.unsafeTcPluginTcM . Ghc.runTcSWithEvBinds evBindsVar $ do
-      -- Add givens back in
-      Ghc.solveSimpleGivens givens
-      -- Try to solve the constraint with both top level instances and givens
-      void $ Ghc.solveSimpleWanteds (Ghc.singleCt predCt)
-    -- Check if GHC produced evidence
-    mEvTerm <- Ghc.unsafeTcPluginTcM $ lookupEvTerm evBindsVar predDest
-    case mEvTerm of
-      Just (Ghc.EvExpr evExpr) -> do
-        evBindsMap <- Ghc.unsafeTcPluginTcM $ Ghc.getTcEvBindsMap evBindsVar
-        let freeVars =
-              filter (\x -> not (isDFunId x)
-                         || isNothing (Ghc.lookupEvBind evBindsMap x)
-                     )
-                     $ Ghc.exprFreeVarsList evExpr
-        if null freeVars
-           then pure $ Right evExpr
-           else do
-             mCts <- traverse (mkNewWantedFromExpr ctLoc) freeVars
-             pure . Left $ catMaybes mCts
-      _ -> pure $ Left [predCt]
+  fieldNameExpr <- Ghc.mkStringExprFS' fieldName
 
   pure $ ePredDict <&> \predDict ->
     Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
@@ -172,6 +149,28 @@ mkFieldGenExpr inp evBindsVar givens fieldGenBndr hkdTy ctLoc predClass predArgs
       [ fieldNameExpr
       , getterExpr
       ]
+
+-- | Attempt to solve a constraint returning new wanted constraints if unsuccessful.
+solvePred
+  :: Ghc.EvBindsVar
+  -> [Ghc.Ct]
+  -> Ghc.Ct
+  -> Ghc.TcEvDest
+  -> Ghc.TcM (Either [Ghc.Ct] Ghc.EvExpr)
+solvePred evBindsVar givens predCt predDest = do
+  wanteds <- Ghc.runTcSWithEvBinds evBindsVar $ do
+    -- Add givens back in
+    Ghc.solveSimpleGivens givens
+    -- Try to solve the constraint with both top level instances and givens
+    Ghc.solveSimpleWanteds (Ghc.singleCt predCt)
+  -- Check if GHC produced evidence
+  mEvTerm <- lookupEvTerm evBindsVar predDest
+  pure $ case mEvTerm of
+    Just (Ghc.EvExpr evExpr) -> do
+      if Ghc.isSolvedWC wanteds
+         then Right evExpr
+         else Left . Ghc.ctsElts $ Ghc.wc_simple wanteds
+    _ -> Left [predCt]
 
 -- | Puts the pieces together to form the resulting expr
 mkFoldFieldsExpr :: Ghc.TyVar -> Ghc.Id -> [Ghc.CoreExpr] -> Ghc.TcPluginM Ghc.CoreExpr
@@ -208,24 +207,6 @@ mkFoldFieldsExpr xTyVar fieldGenBndr fieldGenExprs = do
                     (Ghc.mkListExpr (Ghc.mkTyVarTy xTyVar) fieldGenExprs)
 
   pure $ Ghc.mkCoreLams lamArgs bodyExpr
-
-isDFunId :: Ghc.EvVar -> Bool
-isDFunId var =
-  Ghc.isId var &&
-     case Ghc.idDetails var of
-       Ghc.DFunId{} -> True
-       _ -> False
-
-mkNewWantedFromExpr
-  :: Ghc.CtLoc
-  -> Ghc.EvVar
-  -> Ghc.TcPluginM (Maybe Ghc.Ct)
-mkNewWantedFromExpr ctLoc evVar
-  | let exprTy = Ghc.exprType (Ghc.Var evVar)
-  , Just (tyCon, args) <- Ghc.tcSplitTyConApp_maybe exprTy
-  , Just cls <- Ghc.tyConClass_maybe tyCon
-  = Just . fst <$> makeWantedCt ctLoc cls args
-  | otherwise = pure Nothing
 
 -- | Look up whether a 'TcEvDest' has been filled with evidence.
 lookupEvTerm

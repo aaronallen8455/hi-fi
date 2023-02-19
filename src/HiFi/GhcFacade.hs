@@ -10,6 +10,7 @@ module HiFi.GhcFacade
   , mkTcPluginSolveResult
   , findImportedModule'
   , initDsTc'
+  , adaptSolver
   ) where
 
 #if MIN_VERSION_ghc(9,4,0)
@@ -157,4 +158,23 @@ initDsTc' :: Ghc.DsM a -> Ghc.TcM (Maybe a)
 initDsTc' = fmap snd . Ghc.initDsTc
 #elif MIN_VERSION_ghc(9,2,0)
 initDsTc' = fmap Just . Ghc.initDsTc
+#endif
+
+adaptSolver
+  :: ( Ghc.EvBindsVar
+    -> [Ghc.Ct]
+    -> [Ghc.Ct]
+#if MIN_VERSION_ghc(9,4,0)
+    -> Ghc.TcPluginM Ghc.TcPluginSolveResult
+#elif MIN_VERSION_ghc(9,2,0)
+    -> Ghc.TcPluginM Ghc.TcPluginResult
+#endif
+    )
+  -> Ghc.TcPluginSolver
+#if MIN_VERSION_ghc(9,4,0)
+adaptSolver = id
+#elif MIN_VERSION_ghc(9,2,0)
+adaptSolver solver given _derived wanted = do
+  evBindsVar <- Ghc.getEvBindsTcPluginM
+  solver evBindsVar given wanted
 #endif
