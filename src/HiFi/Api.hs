@@ -30,6 +30,8 @@ module HiFi.Api
   , ToRecord
   , FieldGetters
   , WithHkdFields
+  -- * Re-exports
+  , Identity(..)
   ) where
 
 import           Control.Applicative (liftA2)

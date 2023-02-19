@@ -1,3 +1,3 @@
-packages: .
+packages: ., test-data, hi-fi-aeson
 
 allow-newer: named:base

@@ -99,6 +99,7 @@ mkFieldGenExpr
 mkFieldGenExpr inp fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recordTy (fieldName, fieldParts) = do
   hkdName <- Ghc.unsafeTcPluginTcM
            $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
+
   let hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
       getterExpr =
         Ghc.mkCoreLams [hkdBndr] $
@@ -181,8 +182,6 @@ mkFoldFieldsExpr xTyVar fieldGenBndr fieldGenExprs = do
 
 -- | The output of solving wanted contains references to variables that are not
 -- in scope so an expr must be constructed that binds those variables locally.
--- The solver seems to always output them in reverse dependency order, hence
--- using a left fold to build the bindings.
 buildEvExprFromMap
   :: Ghc.CtLoc
   -> Ghc.EvVar

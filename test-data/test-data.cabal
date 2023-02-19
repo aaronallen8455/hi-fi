@@ -1,0 +1,19 @@
+cabal-version:      3.0
+name:               test-data
+version:            0.1.0.0
+-- synopsis:
+-- description:
+license:            BSD-3-Clause
+license-file:       LICENSE
+author:             Aaron Allen
+maintainer:         aaronallen8455@gmail.com
+-- copyright:
+category:           Data
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+
+library
+  default-language: GHC2021
+  hs-source-dirs: .
+  exposed-modules: Record
+  build-depends: base
