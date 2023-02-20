@@ -25,7 +25,7 @@ module HiFi.Api
   , toFieldName
   , NestHKD(..)
   , ToHkdFields(..)
-  , FoldFields(..)
+  , FoldFields
   , FieldTy
   , ToRecord
   , FieldGetters

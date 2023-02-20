@@ -65,12 +65,6 @@ test-suite hi-fi-test
         tasty-quickcheck,
         quickcheck-properties
 
-library test-data
-  default-language: GHC2021
-  hs-source-dirs: test-data
-  exposed-modules: Record
-  build-depends: base
-
 test-suite hi-fi-type-errors
   default-language: GHC2021
   type: exitcode-stdio-1.0
