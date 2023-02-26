@@ -1,4 +1,7 @@
-# Hi-Fi
+<h1 style="display: flex;align-items: center;">
+  <img src="logo.svg" alt="hi-fi logo" width="80" height="80"/>
+  Hi-Fi
+</h1>
 
 ### Intro
 

@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE PatternSynonyms #-}
 module HiFi.Api
   ( hkdMap
   , hkdSequenceShallow
@@ -31,7 +32,7 @@ module HiFi.Api
   , FieldGetters
   , WithHkdFields
   -- * Re-exports
-  , Identity(..)
+  , Identity(I, ..)
   ) where
 
 import           Control.Applicative (liftA2)
@@ -195,3 +196,7 @@ atField afa rec =
 hkdApplyUpdate :: (ToRecord rec, FieldGetters rec) => HKD rec Maybe -> rec -> rec
 hkdApplyUpdate upd rec =
   fromHKD $ hkdZipWith (\m i -> maybe i coerce m) upd (toHKD rec)
+
+pattern I :: a -> Identity a
+pattern I a = Identity a
+{-# COMPLETE I #-}

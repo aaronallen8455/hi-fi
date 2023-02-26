@@ -47,7 +47,11 @@ tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
                          fields
               for mExprs $ \exprs -> do
                 let funTy = Ghc.mkVisFunTyMany recordTy (Ghc.anyTypeOfKind Ghc.liftedTypeKind)
-                pure (Just (Ghc.EvExpr $ Ghc.mkListExpr funTy exprs), [], ct)
+                pure MkResult
+                  { evidence = Just . Ghc.EvExpr $ Ghc.mkListExpr funTy exprs
+                  , newWanted = []
+                  , subject = ct
+                  }
 
          -- ToRecord
          | clsName == toRecordName
@@ -60,7 +64,11 @@ tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
               let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.Many arrType
                   expr = mkToRecordExpr inp recordTy recordParts arrBind 0
                   result = Ghc.mkCoreLams [arrBind] expr
-              pure $ Just (Just (Ghc.EvExpr result), [], ct)
+              pure $ Just MkResult
+                { evidence = Just (Ghc.EvExpr result)
+                , newWanted = []
+                , subject = ct
+                }
 
          -- FoldFields
          | clsName == foldFieldsName
@@ -81,8 +89,16 @@ tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
                      predArgs
                      fields
               pure $ case result of
-                Left newWanteds -> Just (Nothing, newWanteds, ct)
-                Right expr -> Just (Just (Ghc.EvExpr expr), [], ct)
+                Left newWanteds -> Just MkResult
+                  { evidence = Nothing
+                  , newWanted = newWanteds
+                  , subject = ct
+                  }
+                Right expr -> Just MkResult
+                  { evidence = Just (Ghc.EvExpr expr)
+                  , newWanted = []
+                  , subject = ct
+                  }
 
          -- Instantiate
          | clsName == instantiateName
@@ -105,7 +121,11 @@ tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
                   recordFieldMap
                   tuplePairs
                   effectCon
-              pure $ Just (Just (Ghc.EvExpr instantiateExpr), newWanteds, ct)
+              pure $ Just MkResult
+                { evidence = Just (Ghc.EvExpr instantiateExpr)
+                , newWanted = newWanteds
+                , subject = ct
+                }
 
          -- HkdHasField
          | clsName == hkdHasFieldName
@@ -119,7 +139,11 @@ tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
                   namesToIndexes = fmap fieldNesting <$> fields
               for (lookup fieldName namesToIndexes) $ \idx -> do
                 getterExpr <- mkHkdHasFieldExpr inp recTy effectTy idx
-                pure (Just (Ghc.EvExpr getterExpr), [], ct)
+                pure MkResult
+                  { evidence = Just (Ghc.EvExpr getterExpr)
+                  , newWanted = []
+                  , subject = ct
+                  }
 
          -- HkdSetField
          | clsName == hkdSetFieldName
@@ -133,24 +157,34 @@ tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
                   namesToIndexes = fmap fieldNesting <$> fields
               for (lookup fieldName namesToIndexes) $ \idx -> do
                 setterExpr <- mkHkdSetFieldExpr inp recTy effectTy fieldTy idx
-                pure (Just (Ghc.EvExpr setterExpr), [], ct)
+                pure MkResult
+                  { evidence = Just (Ghc.EvExpr setterExpr)
+                  , newWanted = []
+                  , subject = ct
+                  }
 
          | otherwise -> pure Nothing
     _ -> pure Nothing
 
   let newWanteds = do
-        Just (Just _, ws, _) <- results
+        Just MkResult { evidence = Just _, newWanted = ws } <- results
         ws
       insolubles = do
-        Just (Nothing, ws, ct) <- results
+        Just MkResult { evidence = Nothing, newWanted = ws, subject = ct } <- results
         ws ++ [ct]
       solveds = do
-        Just (mR, _, ct) <- results
-        case mR of
+        Just MkResult { evidence = mEv, subject = ct } <- results
+        case mEv of
           Just r -> [(r, ct)]
           _ -> []
 
   pure $ Ghc.mkTcPluginSolveResult newWanteds insolubles solveds
+
+data Result = MkResult
+  { evidence :: !(Maybe Ghc.EvTerm) -- ^ Resulting dict, if successful
+  , newWanted :: ![Ghc.Ct] -- ^ New wanted to emit
+  , subject :: !Ghc.Ct -- ^ Constraint being solved
+  }
 
 getStrTyLitVal :: Ghc.Type -> Maybe Ghc.FastString
 getStrTyLitVal = \case
@@ -163,8 +197,8 @@ guardSupportedRecord
   :: PluginInputs
   -> Ghc.Type
   -> Ghc.Ct
-  -> (RecordParts -> Ghc.TcPluginM (Maybe (Maybe Ghc.EvTerm, [Ghc.Ct], Ghc.Ct)))
-  -> Ghc.TcPluginM (Maybe (Maybe Ghc.EvTerm, [Ghc.Ct], Ghc.Ct))
+  -> (RecordParts -> Ghc.TcPluginM (Maybe Result))
+  -> Ghc.TcPluginM (Maybe Result)
 guardSupportedRecord inp recordTy ct k =
   -- If the record type is a type variable, return nothing so that the constraint
   -- will be attempted again when the variable is instantiated.
@@ -177,9 +211,17 @@ guardSupportedRecord inp recordTy ct k =
           -- use the place holder evidence for the wanted constraint so that the
           -- desired error message will be displayed.
           newWanted <- fst <$> makeWantedCt (Ghc.ctLoc ct) (unsupportedRecordClass inp) [ty]
-          pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
+          pure $ Just MkResult
+            { evidence = Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct
+            , newWanted = [newWanted]
+            , subject = ct
+            }
         Left (DataConNotInScope dataCon) -> do
           newWanted <- fst <$> makeWantedCt (Ghc.ctLoc ct) (dataConNotInScopeClass inp)
                          [Ghc.mkTyConTy $ Ghc.promoteDataCon dataCon]
-          pure $ Just (Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct, [newWanted], ct)
+          pure $ Just MkResult
+            { evidence = Just $ Ghc.ctEvTerm $ Ghc.ctEvidence ct
+            , newWanted = [newWanted]
+            , subject = ct
+            }
         Right recParts -> k recParts

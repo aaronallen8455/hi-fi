@@ -193,7 +193,7 @@ instance FoldFields NFData rec f => NFData (HKD rec f) where
   rnf hkd =
     let go :: forall a. NFData (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> ()
         go _ getter = rnf (getter hkd)
-     in foldFields @NFData @rec @f go () (\() () -> ())
+     in foldFields @NFData @rec @f go () seq
 
 instance (HasField (name :: Symbol) rec a, HkdHasField name rec f a, result ~ FieldTy f a)
     => HasField name (HKD rec f) result where
