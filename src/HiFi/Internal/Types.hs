@@ -63,6 +63,8 @@ type RecArray = A.Array Exts.Any
 
 -- | Marks a nested record field so that it inherits the higher kindedness of
 -- the ambient record.
+--
+-- @since 0.1.0.0
 newtype NestHKD a = NestHKD { unNestHKD :: a }
   deriving newtype
     ( Eq

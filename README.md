@@ -28,6 +28,10 @@ file to enable the plugin:
 ghc-options: -fplugin HiFi
 ```
 
+Everything you need is exported by the `HiFi` module. This module can be
+imported either qualified or unqualified, but using an explicit import list for
+it is not recommended.
+
 ### Instantiation
 
 The special `mkHKD` function is used to instantiate the higher kinded data

@@ -5,6 +5,7 @@ module Main (main, Test4(..), Test7(..), Test8(..)) where
 
 import           Data.Foldable
 import           Data.Functor.Compose
+import           Data.Functor.Const
 import           Data.Functor.Identity
 import           Data.Monoid
 import           Data.String
@@ -23,6 +24,7 @@ tests = testGroup "tests"
   [ testProperty "trip record" tripRecord
   , testCase "getters" testGetters
   , testCase "setters" testSetters
+  , testCase "lenses" testLenses
   , testCase "sequence" testSequence
   , testGroup "instantiation"
     [ testCase "basic" testInstantiation
@@ -74,6 +76,14 @@ testSetters = do
           $ toHKD testInput1
   Test1 False 2 5.1 (-9.1) (UnicodeString "dsa")
     @=? fromHKD hkd
+
+testLenses :: Assertion
+testLenses = do
+  let hkd = toHKD testInput1
+  I testInput1.t1a @=? view (atField @"t1a") hkd
+  testInput1.t1a @=? view (atFieldI @"t1a") hkd
+  testInput1 { t1b = 9 } @=? fromHKD (set (atFieldI @"t1b") hkd 9)
+  testInput1 { t1b = 11 } @=? fromHKD (set (atField @"t1b") hkd (I 11))
 
 testSequence :: Assertion
 testSequence = do
@@ -483,7 +493,7 @@ testHkdDistribute = do
               , t1d = Compose [Just 9.9, Nothing]
               , t1e = Compose [Nothing, Nothing]
               }
-  hkd @=? hkdDistributeShallow hkds
+  hkd @=? hkdDistributeOuter hkds
 
 testInstantiationNested :: Assertion
 testInstantiationNested = do
@@ -815,3 +825,9 @@ instance Arbitrary (HKD (Test8 (Test7 Test2) Test2) Identity) where
 
 instance IsString UnicodeString where
   fromString = UnicodeString
+
+view :: (forall f. Functor f => (a -> f a) -> s -> f s) -> s -> a
+view lens s = getConst $ lens Const s
+
+set :: (forall f. Functor f => (a -> f a) -> s -> f s) -> s -> a -> s
+set lens s a = runIdentity $ lens (const $ I a) s
