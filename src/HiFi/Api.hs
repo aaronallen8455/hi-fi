@@ -2,6 +2,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE UndecidableInstances #-}
 module HiFi.Api
   ( -- * HKD API
     hkdMap
@@ -30,6 +31,7 @@ module HiFi.Api
   , fill
   , fillC
   , withInstances
+  , buildWithInstances
   -- * Utilities
   , hkdApplyUpdate
   , hkdApplyModifier
@@ -45,6 +47,8 @@ module HiFi.Api
   , ToRecord
   , FieldGetters
   , WithHkdFields
+  , OverFieldTy
+  , Recurse
   , HKD
   -- * Re-exports
   , I
@@ -65,7 +69,7 @@ import           GHC.Records
 import           GHC.TypeLits
 import           Unsafe.Coerce (unsafeCoerce)
 
-import           HiFi.Internal.Types (FieldGetters(..), FieldName(..), FieldTy, FoldFields(..), HKD(..), HkdHasField, HkdSetField, HkdSetField(..), Instantiate(..), NestHKD(..), ToHkdFields(..), ToRecord(..), WithHkdFields)
+import           HiFi.Internal.Types (FieldGetters(..), FieldName(..), FieldTy, FoldFields(..), HKD(..), HkdHasField, HkdSetField, HkdSetField(..), Instantiate(..), NestHKD(..), OverFieldTy, ToHkdFields(..), ToRecord(..), WithHkdFields)
 import           HiFi.StringSing (StringSing(..), toFieldName)
 
 --------------------------------------------------------------------------------
@@ -320,15 +324,16 @@ fill x = UnsafeMkHKD . A.arrayFromList $ unsafeCoerce x <$ fieldGetters @rec
 --
 -- @since 0.1.0.0
 fillC :: forall c rec f
-       . (Applicative f, FoldFields (WithHkdFields c Identity) rec Identity)
-      => (forall a. c a => f a)
+       . (Applicative f, FoldFields (WithHkdFields (OverFieldTy c Identity) Identity) rec Identity)
+      => (forall a. c (FieldTy Identity a) => f (FieldTy Identity a))
       -> f (HKD rec Identity)
-fillC fa = withInstances @c (\_ _ -> fa)
+fillC fa =
+  withInstances @(OverFieldTy c Identity) @f @I @rec (\_ _ _ -> fa)
 
 -- | Accepts a handler that is invoked for each field of the record, providing
--- an instance of the given class as along with the field name and a getter in
+-- an instance of the given class as along with the field name and getters in
 -- order to construct a result. The results from each field are then aggregated
--- to form a complete record in HKD form.
+-- using an Applicative to form a complete record in HKD form.
 --
 -- This can be used to implement some type classes in a record generic way.
 --
@@ -336,23 +341,82 @@ fillC fa = withInstances @c (\_ _ -> fa)
 withInstances
   :: forall c f g rec
    . (Applicative f, FoldFields (WithHkdFields c g) rec g)
-  => (forall a. c (FieldTy g a)
+  => (forall a. c a
         => String -- ^ field name
         -> (HKD rec g -> FieldTy g a) -- ^ getter
+        -> (rec -> a)
         -> f (FieldTy g a)
      )
   -> f (HKD rec g)
 withInstances k =
-  let go :: forall a. (c (FieldTy g a), ToHkdFields g (FieldTy g a))
+  let go :: forall a. (c a, ToHkdFields g (FieldTy g a))
          => String
          -> (HKD rec g -> FieldTy g a)
+         -> (rec -> a)
          -> f [g Exts.Any]
-      go name getter = toHkdFields <$> k @a name getter
+      go name getter recGetter = toHkdFields <$> k @a name getter recGetter
    in coerce . A.arrayFromList <$>
         foldFields @(WithHkdFields c g) @rec @g
           go
           (pure [] :: f [g Exts.Any])
           (liftA2 (++))
+
+data Evidence c f a fty where
+  NotNested :: c a => Evidence c f a (f a)
+  Nested :: forall rec c f. FoldFields (WithHkdFields (Recurse c f) f) rec f
+         => Evidence c f (NestHKD rec) (HKD rec f)
+
+class Recurse' c f a (FieldTy f a) => Recurse c f a where
+instance Recurse' c f a (FieldTy f a) => Recurse c f a where
+
+class FieldTy f a ~ fty => Recurse' c f a fty where
+  recurse :: Evidence c f a fty
+
+instance (FieldTy f a ~ f a, c a) => Recurse' c f a (f a) where
+  recurse = NotNested
+
+instance FoldFields (WithHkdFields (Recurse c f) f) rec f
+    => Recurse' c f (NestHKD rec) (HKD rec f) where
+  recurse = Nested
+
+-- | Similar to 'withInstances' but constructs an HKD directly rather than
+-- having it wrapped in an Appicative.
+--
+-- @since 0.1.0.0
+buildWithInstances
+  :: forall c g rec
+   . FoldFields (WithHkdFields (Recurse c g) g) rec g
+  => (forall a
+         . c a
+        => String
+        -> (HKD rec g -> g a)
+        -> (rec -> a)
+        -> g a
+     )
+  -> HKD rec g
+buildWithInstances k =
+  let go :: forall a. Recurse c g a
+         => String
+         -> (HKD rec g -> FieldTy g a)
+         -> (rec -> a)
+         -> Identity (FieldTy g a)
+      go fieldName getter recGetter =
+        let nestedRec :: forall nestedRec
+                       . ( FoldFields (WithHkdFields (Recurse c g) g) nestedRec g
+                         , a ~ NestHKD nestedRec
+                         )
+                      => HKD nestedRec g
+            nestedRec =
+              buildWithInstances @c @g @nestedRec
+                ( \name innerGetter innerRecGetter ->
+                    k name (innerGetter . getter)
+                           (innerRecGetter . coerce . recGetter)
+                )
+         in Identity $
+           case recurse @c @g @a of
+             NotNested -> k fieldName getter recGetter
+             Nested -> nestedRec
+   in runIdentity $ withInstances @(Recurse c g) @I @g @rec go
 
 --------------------------------------------------------------------------------
 -- Utilities
@@ -373,6 +437,17 @@ hkdApplyUpdate upd rec =
 hkdApplyModifier :: (ToRecord rec, FieldGetters rec) => HKD rec Endo -> rec -> rec
 hkdApplyModifier m rec =
   fromHKD $ hkdZipWith (appEndo . coerce) m (toHKD rec)
+
+-- type family RemoveConApp f a where
+--   RemoveConApp f (f a) = a
+-- 
+-- class NoNestedHKD f a where
+--   noNestedHkdProof :: FieldTy f (RemoveConApp f a) :~: a
+-- instance FieldTy f a ~ f a => NoNestedHKD f (f a) where
+--   noNestedHkdProof = Refl
+-- instance (TypeError (Text "Nested HKD fields not allowed here"))
+--   => NoNestedHKD f (HKD a f) where
+--   noNestedHkdProof = error "impossible"
 
 --------------------------------------------------------------------------------
 -- Synonyms

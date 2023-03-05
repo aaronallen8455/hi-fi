@@ -224,25 +224,25 @@ import qualified HiFi
 
 newtype HkdCsv record = MkHkdCsv record
 
-instance ( HiFi.FoldFields (HiFi.WithHkdFields Csv.FromField Identity) record Identity
+instance ( HiFi.FoldFields (HiFi.WithHkdFields (HiFi.OverFieldTy Csv.FromField Identity) Identity) record Identity
          , HiFi.ToRecord record
          )
     => Csv.FromNamedRecord (HkdCsv record) where
   parseNamedRecord m =
-    let lookupField fieldName _ = Csv.lookup m (fromString fieldName)
+    let lookupField fieldName _ _ = Csv.lookup m (fromString fieldName)
      in MkHkdCsv . HiFi.fromHKD
-          <$> HiFi.withInstances @Csv.FromField lookupField
+          <$> HiFi.withInstances @(HiFi.OverFieldTy Csv.FromField Identity) lookupField
 
-instance ( HiFi.FoldFields (HiFi.WithHkdFields Csv.ToField Identity) record Identity
+instance ( HiFi.FoldFields (HiFi.WithHkdFields (HiFi.OverFieldTy Csv.ToField Identity) Identity) record Identity
          , HiFi.FieldGetters record
          )
     => Csv.ToNamedRecord (HkdCsv record) where
   toNamedRecord (MkHkdCsv rec) =
     let hkd = toHKD rec
-        mkField fieldName getter =
+        mkField fieldName getter _ =
           Const [ Csv.namedField (fromString fieldName) (getter hkd) ]
      in Csv.namedRecord . getConst
-          $ HiFi.withInstances @Csv.ToField mkField
+          $ HiFi.withInstances @(OverFieldTy Csv.ToField Identity) mkField
 
 data Person =
   MkPerson

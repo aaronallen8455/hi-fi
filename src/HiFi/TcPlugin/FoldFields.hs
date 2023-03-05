@@ -29,7 +29,7 @@ buildFoldFieldsExpr inp@MkPluginInputs{..} evBindsVar givens ctLoc recordTy effe
   let xTyVar = Ghc.mkTyVar xTyVarName Ghc.liftedTypeKind
       hkdTy = Ghc.mkTyConApp hkdTyCon [recordTy, effectConTy]
 
-  fieldGenBndr <- mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs
+  fieldGenBndr <- mkFieldGenBndr inp recordTy effectConTy predClass hkdTy xTyVar predArgs
 
   eFieldGenExprs <-
     traverse
@@ -55,12 +55,13 @@ buildFoldFieldsExpr inp@MkPluginInputs{..} evBindsVar givens ctLoc recordTy effe
 mkFieldGenBndr
   :: PluginInputs
   -> Ghc.Type
+  -> Ghc.Type
   -> Ghc.Class
   -> Ghc.Type
   -> Ghc.TyVar
   -> [Ghc.Type]
   -> Ghc.TcPluginM Ghc.Id
-mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs = do
+mkFieldGenBndr inp recordTy effectConTy predClass hkdTy xTyVar predArgs = do
     fieldGenName <- Ghc.unsafeTcPluginTcM
                   $ Ghc.newName (Ghc.mkOccName Ghc.varName "fieldGen")
 
@@ -74,6 +75,7 @@ mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs = do
         -- forall a. (C (FieldTy f a)
         --   => String
         --   -> (HKD rec f -> FieldTy f a)
+        --   -> (rec -> a)
         --   -> x
         fieldGenTy = Ghc.mkSigmaTy forallBndrs preds tyBody
           where
@@ -87,6 +89,11 @@ mkFieldGenBndr inp effectConTy predClass hkdTy xTyVar predArgs = do
                      ( hkdTy
                      `Ghc.mkVisFunTyMany`
                        fieldTy
+                     )
+                   `Ghc.mkVisFunTyMany`
+                     ( recordTy
+                     `Ghc.mkVisFunTyMany`
+                       Ghc.mkTyVarTy tyVar
                      )
                    `Ghc.mkVisFunTyMany`
                      Ghc.mkTyVarTy xTyVar
@@ -111,6 +118,7 @@ mkFieldGenExpr
 mkFieldGenExpr inp evBindsVar givens fieldGenBndr hkdTy ctLoc predClass predArgs effectConTy recordTy (fieldName, fieldParts) = do
   hkdName <- Ghc.unsafeTcPluginTcM
            $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
+  selectorId <- Ghc.tcLookupId $ fieldSelName fieldParts
 
   let hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
       getterExpr =
@@ -132,9 +140,9 @@ mkFieldGenExpr inp evBindsVar givens fieldGenBndr hkdTy ctLoc predClass predArgs
                              , Ghc.mkUncheckedIntExpr offset
                              , Ghc.mkUncheckedIntExpr len
                              ]
+      recGetterExpr = Ghc.Var selectorId
       predClassArgs =
-        predArgs ++
-        [Ghc.mkTyConApp (fieldTyTyCon inp) [effectConTy, fieldType fieldParts]]
+        predArgs ++ [fieldType fieldParts]
 
   (predCt, predDest) <- makeWantedCt ctLoc predClass predClassArgs
 
@@ -143,11 +151,12 @@ mkFieldGenExpr inp evBindsVar givens fieldGenBndr hkdTy ctLoc predClass predArgs
   fieldNameExpr <- Ghc.mkStringExprFS' fieldName
 
   pure $ ePredDict <&> \predDict ->
-    Ghc.mkCoreApps (Ghc.Var fieldGenBndr) $
+    Ghc.mkCoreApps (Ghc.Var fieldGenBndr)
       [ Ghc.Type $ fieldType fieldParts
-      ] ++ [predDict] ++
-      [ fieldNameExpr
+      , predDict
+      , fieldNameExpr
       , getterExpr
+      , recGetterExpr
       ]
 
 -- | Attempt to solve a constraint returning new wanted constraints if unsuccessful.

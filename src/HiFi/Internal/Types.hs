@@ -29,6 +29,7 @@ module HiFi.Internal.Types
   , unsafeCoerceF
   , NestHKD(..)
   , FieldTy
+  , OverFieldTy
   ) where
 
 import           Control.DeepSeq (NFData(..))
@@ -111,61 +112,65 @@ instance ToHkdFields f (HKD rec f) where
 --------------------------------------------------------------------------------
 
 type WithHkdFields :: (Type -> Constraint) -> (Type -> Type) -> Type -> Constraint
-class (c a, ToHkdFields f a) => WithHkdFields c f a
-instance (c a, ToHkdFields f a) => WithHkdFields c f a
+class (c a, ToHkdFields f (FieldTy f a)) => WithHkdFields c f a
+instance (c a, ToHkdFields f (FieldTy f a)) => WithHkdFields c f a
 
-instance FoldFields (WithHkdFields Semigroup f) rec f => Semigroup (HKD rec f) where
+instance FoldFields (WithHkdFields (OverFieldTy Semigroup f) f) rec f => Semigroup (HKD rec f) where
   a@(UnsafeMkHKD arr) <> b =
     let builder :: forall s. A.MutableArray s (f Exts.Any) -> ST s ()
         builder newArr = do
           let go :: forall a. (Semigroup (FieldTy f a), ToHkdFields f (FieldTy f a))
                  => String
                  -> (HKD rec f -> FieldTy f a)
+                 -> (rec -> a)
                  -> Int
                  -> ST s Int
-              go _ getter !idx = do
+              go _ getter _ !idx = do
                 let writeElems i x = do
                       A.writeArray newArr i x
                       pure $! i - 1
                     fields = toHkdFields $ getter a <> getter b
                 foldM writeElems idx $ reverse fields
-          void $ foldFields @(WithHkdFields Semigroup f) @rec @f
+          void $ foldFields @(WithHkdFields (OverFieldTy Semigroup f) f) @rec @f
                    go
                    (pure (A.sizeofArray arr - 1))
                    (=<<)
      in coerce $ A.createArray (A.sizeofArray arr) (error "Semigroup: impossible") builder
 
-instance (FoldFields (WithHkdFields Semigroup f) rec f, FoldFields (WithHkdFields Monoid f) rec f)
+instance ( FoldFields (WithHkdFields (OverFieldTy Semigroup f) f) rec f
+         , FoldFields (WithHkdFields (OverFieldTy Monoid f) f) rec f
+         )
     => Monoid (HKD rec f) where
   mempty =
     let go :: forall a. (Monoid (FieldTy f a), ToHkdFields f (FieldTy f a))
-           => String -> (HKD rec f -> FieldTy f a) -> [f Exts.Any]
-        go _ _ = toHkdFields $ mempty @(FieldTy f a)
+           => String -> (HKD rec f -> FieldTy f a) -> (rec -> a) -> [f Exts.Any]
+        go _ _ _ = toHkdFields $ mempty @(FieldTy f a)
         fields =
-          foldFields @(WithHkdFields Monoid f) @rec @f go [] (++)
+          foldFields @(WithHkdFields (OverFieldTy Monoid f) f) @rec @f go [] (++)
      in coerce $ A.arrayFromList fields
 
-instance FoldFields Eq rec f => Eq (HKD rec f) where
+instance FoldFields (OverFieldTy Eq f) rec f => Eq (HKD rec f) where
   a == b =
-    let go :: forall a. Eq (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> Bool
-        go _ getter = getter a == getter b
-     in foldFields @Eq @rec @f go True (&&)
+    let go :: forall a. Eq (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> (rec -> a) -> Bool
+        go _ getter _ = getter a == getter b
+     in foldFields @(OverFieldTy Eq f) @rec @f go True (&&)
 
-instance FoldFields Show rec f => Show (HKD rec f) where
+instance FoldFields (OverFieldTy Show f) rec f => Show (HKD rec f) where
   show rec =
-    let go :: forall a. Show (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> String
-        go fieldName getter =
+    let go :: forall a. Show (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> (rec -> a) -> String
+        go fieldName getter _ =
           fieldName <> " = " <> show (getter rec)
-     in "HKD {" <> List.intercalate ", " (foldFields @Show @rec @f go [] (:)) <> "}"
+     in "HKD {" <> List.intercalate ", " (foldFields @(OverFieldTy Show f) @rec @f go [] (:)) <> "}"
 
-instance FoldFields (WithHkdFields Read f) rec f => Read (HKD rec f) where
+instance FoldFields (WithHkdFields (OverFieldTy Read f) f) rec f => Read (HKD rec f) where
   readPrec = do
     let go :: forall a. (Read (FieldTy f a), ToHkdFields f (FieldTy f a))
            => String
            -> (HKD rec f -> FieldTy f a)
+           -> (rec -> a)
            -> Bool
            -> ReadPrec.ReadPrec [f Exts.Any]
-        go fieldName _ checkComma = do
+        go fieldName _ _ checkComma = do
           ReadPrec.lift $ do
             ReadP.string fieldName *> ReadP.skipSpaces
             ReadP.char '=' *> ReadP.skipSpaces
@@ -176,7 +181,7 @@ instance FoldFields (WithHkdFields Read f) rec f => Read (HKD rec f) where
           pure $ toHkdFields x
     ReadPrec.lift $ ReadP.string "HKD" *> ReadP.skipSpaces *> ReadP.char '{' *> ReadP.skipSpaces
     fields <- sequence . fst
-            $ foldFields @(WithHkdFields Read f) @rec @f
+            $ foldFields @(WithHkdFields (OverFieldTy Read f) f) @rec @f
                 go
                 ([], False)
                 (\x (acc, b) -> (x b : acc, True))
@@ -185,17 +190,17 @@ instance FoldFields (WithHkdFields Read f) rec f => Read (HKD rec f) where
       when (n == ReadPrec.minPrec) ReadP.eof
     pure . UnsafeMkHKD $ A.fromList (concat fields)
 
-instance (FoldFields Eq rec f, FoldFields Ord rec f) => Ord (HKD rec f) where
+instance (FoldFields (OverFieldTy Eq f) rec f, FoldFields (OverFieldTy Ord f) rec f) => Ord (HKD rec f) where
   compare a b =
-    let go :: forall a. Ord (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> Ordering
-        go _ getter = compare (getter a) (getter b)
-     in foldFields @Ord @rec @f go mempty (<>)
+    let go :: forall a. Ord (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> (rec -> a) -> Ordering
+        go _ getter _ = compare (getter a) (getter b)
+     in foldFields @(OverFieldTy Ord f) @rec @f go mempty (<>)
 
-instance FoldFields NFData rec f => NFData (HKD rec f) where
+instance FoldFields (OverFieldTy NFData f) rec f => NFData (HKD rec f) where
   rnf hkd =
-    let go :: forall a. NFData (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> ()
-        go _ getter = rnf (getter hkd)
-     in foldFields @NFData @rec @f go () seq
+    let go :: forall a. NFData (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> (rec -> a) -> ()
+        go _ getter _ = rnf (getter hkd)
+     in foldFields @(OverFieldTy NFData f) @rec @f go () seq
 
 instance (HasField (name :: Symbol) rec a, HkdHasField name rec f a, result ~ FieldTy f a)
     => HasField name (HKD rec f) result where
@@ -226,7 +231,11 @@ type FoldFields :: (Type -> Constraint) -> Type -> (Type -> Type) -> Constraint
 class FoldFields c rec f where
   foldFields :: forall acc x.
                 (forall a.
-                  c (FieldTy f a) => String -> (HKD rec f -> FieldTy f a) -> x
+                  c a
+                    => String
+                    -> (HKD rec f -> FieldTy f a)
+                    -> (rec -> a)
+                    -> x
                 )
              -> acc
              -> (x -> acc -> acc)
@@ -318,3 +327,7 @@ arrayFromList = UnsafeMkHKD . A.arrayFromList
 
 unsafeCoerceF :: forall (f :: Type -> Type) (a :: Type). f a -> f Exts.Any
 unsafeCoerceF = unsafeCoerce
+
+type OverFieldTy :: (Type -> Constraint) -> (Type -> Type) -> Type -> Constraint
+class c (FieldTy f a) => OverFieldTy c f a
+instance c (FieldTy f a) => OverFieldTy c f a
