@@ -11,6 +11,7 @@ module HiFi.GhcFacade
   , findImportedModule'
   , initDsTc'
   , adaptSolver
+  , hsLet'
   ) where
 
 #if MIN_VERSION_ghc(9,4,0)
@@ -19,6 +20,7 @@ import           GHC.Plugins as Ghc hiding (DefaultingPlugin, TcPlugin, varName,
 import           GHC.Tc.Types as Ghc
 import           GHC.Core.TyCo.Rep as Ghc
 import           GHC.Core.Reduction as Ghc
+import           GHC.Data.Bag as Ghc
 import           GHC.Tc.Plugin as Ghc
 import           GHC.Tc.Types.Evidence as Ghc
 import           GHC.Tc.Types.Constraint as Ghc
@@ -27,6 +29,7 @@ import           GHC.Tc.Utils.Monad as Ghc hiding (getEnvs, getTopEnv, newUnique
 import           GHC.Types.Name as Ghc
 import           GHC.Core.Class as Ghc
 import           GHC.Core.Predicate as Ghc
+import           Language.Haskell.Syntax.Binds as Ghc
 import           Language.Haskell.Syntax.Expr as Ghc
 import           Language.Haskell.Syntax.Extension as Ghc
 import           Language.Haskell.Syntax.Type as Ghc
@@ -48,10 +51,11 @@ import           GHC.Data.StringBuffer as Ghc
 import           GHC.HsToCore.Binds as Ghc
 import           GHC.HsToCore.Monad as Ghc hiding (newUnique)
 import           GHC.Tc.Types.Origin as Ghc
-import           GHC.Parser.Annotation as Ghc (noComments)
+import           GHC.Parser.Annotation as Ghc (noComments, noAnn)
 
 #elif MIN_VERSION_ghc(9,2,0)
 import           GHC as Ghc (lookupName)
+import           GHC.Data.Bag as Ghc
 import           GHC.Plugins as Ghc hiding (TcPlugin, varName, substTy, isInScope, extendTvSubst)
 import           GHC.Tc.Types as Ghc
 import           GHC.Core.TyCo.Rep as Ghc
@@ -63,6 +67,7 @@ import           GHC.Tc.Utils.Monad as Ghc hiding (getEnvs, getTopEnv, newUnique
 import           GHC.Types.Name as Ghc
 import           GHC.Core.Class as Ghc
 import           GHC.Core.Predicate as Ghc
+import           Language.Haskell.Syntax.Binds as Ghc
 import           Language.Haskell.Syntax.Expr as Ghc
 import           Language.Haskell.Syntax.Extension as Ghc
 import           Language.Haskell.Syntax.Type as Ghc
@@ -84,7 +89,7 @@ import           GHC.Data.StringBuffer as Ghc
 import           GHC.HsToCore.Binds as Ghc
 import           GHC.HsToCore.Monad as Ghc hiding (newUnique)
 import           GHC.Tc.Types.Origin as Ghc
-import           GHC.Parser.Annotation as Ghc (noComments)
+import           GHC.Parser.Annotation as Ghc (noComments, noAnn)
 
 #endif
 
@@ -177,4 +182,14 @@ adaptSolver = id
 adaptSolver solver given _derived wanted = do
   evBindsVar <- Ghc.getEvBindsTcPluginM
   solver evBindsVar given wanted
+#endif
+
+hsLet' :: Ghc.HsLocalBindsLR Ghc.GhcPs Ghc.GhcPs
+       -> Ghc.LHsExpr Ghc.GhcPs
+       -> Ghc.HsExpr Ghc.GhcPs
+hsLet' binds body =
+#if MIN_VERSION_ghc(9,4,0)
+  Ghc.HsLet Ghc.noAnn Ghc.noHsTok binds Ghc.noHsTok body
+#elif MIN_VERSION_ghc(9,2,0)
+  Ghc.HsLet Ghc.noAnn binds body
 #endif

@@ -379,8 +379,12 @@ instance FoldFields (WithHkdFields (Recurse c f) f) rec f
     => Recurse' c f (NestHKD rec) (HKD rec f) where
   recurse = Nested
 
--- | Similar to 'withInstances' but constructs an HKD directly rather than
+-- | Similar to 'withInstances' but constructs a HKD directly rather than
 -- having it wrapped in an Appicative.
+--
+-- Caveat: Due to implementation details, the user supplied function is only
+-- invoked for the non-'NestHKD' fields. This means that it is invoked for the
+-- fields within the nested record but not the nested record field as a whole.
 --
 -- @since 0.1.0.0
 buildWithInstances

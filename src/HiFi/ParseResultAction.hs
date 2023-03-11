@@ -61,7 +61,40 @@ transformMkHKD = \case
       -> let fieldPairs = Ghc.getFieldPair . Ghc.unLoc <$> fields
              mQualifier = extractQualifier rdrName
              tuple = mkTupleFromFields mQualifier fieldPairs
-          in Ghc.unLoc $ Ghc.nlHsApp rupd_expr tuple
+             -- This results in a expression like:
+             --
+             --   let generatedCode = {tupleExpr}
+             --   in case () of
+             --        _ => mkHKD generatedCode
+             --
+             -- The reason for the let and case is to trick GHC into not
+             -- printing the tuple expr in error messages.
+             varName = Ghc.mkVarUnqual "_generatedCode"
+             appExpr = Ghc.nlHsApp rupd_expr (Ghc.nlHsVar varName)
+             caseExpr =
+               Ghc.nlHsCase (Ghc.nlHsVar $ Ghc.getRdrName Ghc.unitDataCon)
+                 [Ghc.mkHsCaseAlt Ghc.nlWildPat appExpr]
+             letBound =
+               Ghc.hsLet'
+                 (Ghc.HsValBinds Ghc.noAnn
+                   (Ghc.ValBinds
+                     mempty
+                     (Ghc.unitBag . Ghc.noLocA $
+                       Ghc.mkFunBind
+                         Ghc.Generated
+                         (Ghc.noLocA varName)
+                         [Ghc.mkMatch
+                           (Ghc.mkPrefixFunRhs $ Ghc.noLocA varName)
+                           []
+                           tuple
+                           (Ghc.EmptyLocalBinds Ghc.noExtField)
+                         ]
+                     )
+                     []
+                   )
+                 )
+                 caseExpr
+          in Ghc.unLoc . Ghc.nlHsPar $ Ghc.noLocA letBound
     other -> other
   where
     checkExpr = \case
