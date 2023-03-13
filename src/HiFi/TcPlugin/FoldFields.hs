@@ -79,7 +79,7 @@ mkFieldGenBndr inp recordTy effectConTy predClass hkdTy xTyVar predArgs = do
         --   -> x
         fieldGenTy = Ghc.mkSigmaTy forallBndrs preds tyBody
           where
-            forallBndrs = [ Ghc.mkTyCoVarBinder Ghc.Required tyVar ]
+            forallBndrs = [ Ghc.mkTyVarBinder Ghc.Required tyVar ]
             preds = [ Ghc.mkClassPred predClass
                         $ predArgs
                        ++ [ fieldTy ]
@@ -98,7 +98,7 @@ mkFieldGenBndr inp recordTy effectConTy predClass hkdTy xTyVar predArgs = do
                    `Ghc.mkVisFunTyMany`
                      Ghc.mkTyVarTy xTyVar
 
-    pure $ Ghc.mkLocalIdOrCoVar fieldGenName Ghc.Many fieldGenTy
+    pure $ Ghc.mkLocalIdOrCoVar fieldGenName Ghc.ManyTy' fieldGenTy
 
 -- | Make the expr that results from applying all arguments (including the dict)
 -- to the user supplied function that generates a value for each field.
@@ -120,7 +120,7 @@ mkFieldGenExpr inp evBindsVar givens fieldGenBndr hkdTy ctLoc predClass predArgs
            $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
   selectorId <- Ghc.tcLookupId $ fieldSelName fieldParts
 
-  let hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
+  let hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.ManyTy' hkdTy
       getterExpr =
         Ghc.mkCoreLams [hkdBndr] $
           case fieldNesting fieldParts of
@@ -198,9 +198,9 @@ mkFoldFieldsExpr xTyVar fieldGenBndr fieldGenExprs = do
                     `Ghc.mkVisFunTyMany`
                       Ghc.mkTyVarTy accTyVar
 
-      accumulatorBndr = Ghc.mkLocalIdOrCoVar accumulatorName Ghc.Many accumulatorTy
+      accumulatorBndr = Ghc.mkLocalIdOrCoVar accumulatorName Ghc.ManyTy' accumulatorTy
       accTyVar = Ghc.mkTyVar accTyVarName Ghc.liftedTypeKind
-      initAccBndr = Ghc.mkLocalIdOrCoVar initAccName Ghc.Many (Ghc.mkTyVarTy accTyVar)
+      initAccBndr = Ghc.mkLocalIdOrCoVar initAccName Ghc.ManyTy' (Ghc.mkTyVarTy accTyVar)
       lamArgs = [ accTyVar
                 , xTyVar
                 , fieldGenBndr

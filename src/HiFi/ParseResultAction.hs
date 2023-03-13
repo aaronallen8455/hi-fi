@@ -102,7 +102,7 @@ transformMkHKD = \case
         | Ghc.extractName updVar == Ghc.mkFastString "mkHKD"
         -> Just updVar
       Ghc.HsPar' expr -> checkExpr $ Ghc.unLoc expr
-      Ghc.HsAppType _ expr _ -> checkExpr $ Ghc.unLoc expr
+      Ghc.HsAppType' expr _ -> checkExpr $ Ghc.unLoc expr
       _ -> Nothing
 
 extractQualifier :: Ghc.RdrName -> Maybe Ghc.ModuleName
@@ -127,8 +127,7 @@ mkTupleFromFields mQualifier (splitAt (Ghc.mAX_TUPLE_SIZE - 1) -> (fields, rest)
         [Ghc.noLocA $ mkFieldNameExpr fieldName, Ghc.noLocA expr]
         mempty
     mkFieldNameExprDataKinds fieldName =
-      Ghc.HsAppType
-        Ghc.noSrcSpan
+      Ghc.HsAppType'
         (Ghc.noLocA $
           Ghc.HsVar Ghc.noExtField $
             Ghc.L Ghc.noSrcSpanA . mkRdrName Ghc.dataName $

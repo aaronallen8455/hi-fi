@@ -25,7 +25,7 @@ data RecordParts = RecordParts
   { recordCon :: !Ghc.DataCon
   , recordTyArgs :: ![Ghc.Type]
   , recordFields :: ![(Ghc.FastString, FieldParts)]
-  , recordTyVarSubst :: !Ghc.TCvSubst -- Used to instantiate polymorphic fields
+  , recordTyVarSubst :: !Ghc.Subst' -- Used to instantiate polymorphic fields
   }
 
 data FieldParts = FieldParts
@@ -52,7 +52,7 @@ instance Ord TyOrd where
 
 -- This does not resolve type families instances
 expandSynonyms :: Ghc.Type -> Ghc.Type
-expandSynonyms ty = fromMaybe ty $ Ghc.tcView ty
+expandSynonyms ty = fromMaybe ty $ Ghc.coreView' ty
 
 data InvalidHkdReason
   = UnsupportedTy Ghc.Type
@@ -76,7 +76,7 @@ getRecordParts inputs visitedTys (expandSynonyms -> recTy) = case recTy of
     , null $ Ghc.dataConTheta dataCon ++ Ghc.dataConStupidTheta dataCon -> do
       hsc <- lift $ Ghc.tcg_rdr_env . fst <$> Ghc.getEnvs
       let fieldTys = Ghc.scaledThing <$> Ghc.dataConInstOrigArgTys dataCon args
-          fieldLabels = Ghc.flLabel <$> Ghc.dataConFieldLabels dataCon
+          fieldLabels = coerce . Ghc.flLabel <$> Ghc.dataConFieldLabels dataCon
           tcSubst = Ghc.zipTCvSubst (Ghc.dataConUnivAndExTyCoVars dataCon) args
           fieldSelectors = Ghc.flSelector <$> Ghc.dataConFieldLabels dataCon
           newVisitedTys = S.insert (TyOrd recTy) visitedTys

@@ -21,12 +21,12 @@ mkHkdSetFieldExpr MkPluginInputs{..} recTy effectTy fieldTy idx = do
           $ Ghc.newName (Ghc.mkOccName Ghc.varName "el")
 
   let hkdTy = Ghc.mkTyConApp hkdTyCon [recTy, effectTy]
-      hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
+      hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.ManyTy' hkdTy
       setterExpr =
         case idx of
           Unnested ix ->
             let elTy = Ghc.mkAppTys effectTy [Ghc.anyTypeOfKind Ghc.liftedTypeKind]
-                elBndr = Ghc.mkLocalIdOrCoVar elName Ghc.Many elTy
+                elBndr = Ghc.mkLocalIdOrCoVar elName Ghc.ManyTy' elTy
              in Ghc.mkCoreLams [elBndr, hkdBndr]
                 $ Ghc.mkCoreApps (Ghc.Var writeArrayId)
                   [ Ghc.Type recTy
@@ -37,7 +37,7 @@ mkHkdSetFieldExpr MkPluginInputs{..} recTy effectTy fieldTy idx = do
                   , Ghc.Var elBndr
                   ]
           Nested offset len innerRecTy _ ->
-            let innerRecBndr = Ghc.mkLocalIdOrCoVar elName Ghc.Many fieldTy
+            let innerRecBndr = Ghc.mkLocalIdOrCoVar elName Ghc.ManyTy' fieldTy
              in Ghc.mkCoreLams [innerRecBndr, hkdBndr]
                 $ Ghc.mkCoreApps (Ghc.Var setInnerRecId)
                   [ Ghc.Type recTy

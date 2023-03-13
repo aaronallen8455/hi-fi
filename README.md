@@ -279,7 +279,7 @@ hkd = mkHKD
 ```
 
 ### Limitations
-- Currently supports GHC 9.2.x and 9.4.x
+- Currently supports GHC 9.2.x, 9.4.x, and 9.6.x
 - Records must follow certain rules to be promotable to HKDs:
   - Nested records cannot result in inifinite recursion
   - Types of nested records cannot be type family applications

@@ -14,14 +14,14 @@ import           HiFi.TcPlugin.RecordParts
 -- nested HKDs.
 mkFieldGetters
   :: Ghc.Type
-  -> Ghc.TCvSubst
+  -> Ghc.Subst'
   -> FieldParts
   -> Ghc.TcPluginM (Maybe [Ghc.CoreExpr])
 mkFieldGetters recTy subst fp =
     (traverse . traverse) buildExpr
       =<< runMaybeT (collectSels subst fp)
   where
-    collectSels :: Ghc.TCvSubst -> FieldParts -> MaybeT Ghc.TcPluginM [[Ghc.CoreExpr]]
+    collectSels :: Ghc.Subst' -> FieldParts -> MaybeT Ghc.TcPluginM [[Ghc.CoreExpr]]
     collectSels tcSubst fieldParts = do
       selId <- lift . Ghc.tcLookupId $ fieldSelName fieldParts
       selExpr <- MaybeT . pure $ instantiateSelector (Ghc.Var selId) tcSubst
@@ -38,12 +38,12 @@ mkFieldGetters recTy subst fp =
     buildExpr selectors = do
       recName <- Ghc.unsafeTcPluginTcM
                $ Ghc.newName (Ghc.mkOccName Ghc.varName "rec")
-      let recBind = Ghc.mkLocalIdOrCoVar recName Ghc.Many recTy
+      let recBind = Ghc.mkLocalIdOrCoVar recName Ghc.ManyTy' recTy
           go acc selector = Ghc.mkCoreApps selector [acc]
           expr = List.foldl' go (Ghc.Var recBind) selectors
       pure $ Ghc.mkCoreLams [recBind] expr
 
-instantiateSelector :: Ghc.CoreExpr -> Ghc.TCvSubst -> Maybe Ghc.CoreExpr
+instantiateSelector :: Ghc.CoreExpr -> Ghc.Subst' -> Maybe Ghc.CoreExpr
 instantiateSelector sel tcSubst = do
   case Ghc.splitForAllTyCoVar_maybe (Ghc.exprType sel) of
     Nothing -> pure sel

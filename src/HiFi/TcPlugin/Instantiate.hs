@@ -22,7 +22,7 @@ gatherTupleFieldsAndBuildExpr
 gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNamesTys recTy tupleTy effectConTy = do
     tupleName <- Ghc.unsafeTcPluginTcM
                $ Ghc.newName (Ghc.mkOccName Ghc.varName "tuple")
-    let tupleBind = Ghc.mkLocalIdOrCoVar tupleName Ghc.Many tupleTy
+    let tupleBind = Ghc.mkLocalIdOrCoVar tupleName Ghc.ManyTy' tupleTy
 
     (pairs, expr) <- processTupleTy [] tupleBind tupleTy
     pure (pairs, Ghc.mkCoreLams [tupleBind] expr)
@@ -49,18 +49,18 @@ gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNamesTys recTy tupleTy
             <- Ghc.unsafeTcPluginTcM
              $ Ghc.newName (Ghc.mkOccName Ghc.varName "field")
           -- This is variable that the RHS value is bound to
-          let fieldVarId = Ghc.mkLocalIdOrCoVar fieldVarName Ghc.Many fieldTy
+          let fieldVarId = Ghc.mkLocalIdOrCoVar fieldVarName Ghc.ManyTy' fieldTy
 
           fieldPairName
             <- Ghc.unsafeTcPluginTcM
              $ Ghc.newName (Ghc.mkOccName Ghc.varName "fieldPair")
-          let fieldPairId = Ghc.mkLocalIdOrCoVar fieldPairName Ghc.Many ty
+          let fieldPairId = Ghc.mkLocalIdOrCoVar fieldPairName Ghc.ManyTy' ty
               mkPairCase =
                 Ghc.mkSingleAltCase
                   (Ghc.Var fieldPairId)
-                  (Ghc.mkWildValBinder Ghc.Many ty)
+                  (Ghc.mkWildValBinder Ghc.ManyTy' ty)
                   (Ghc.DataAlt $ Ghc.tupleDataCon Ghc.Boxed 2)
-                  [Ghc.mkWildValBinder Ghc.Many fieldNameTy, fieldVarId]
+                  [Ghc.mkWildValBinder Ghc.ManyTy' fieldNameTy, fieldVarId]
 
           pure ( (fieldPairId, (fs, (fieldVarId, fieldTy)))
                , mkPairCase . exprBuilder
@@ -92,7 +92,7 @@ gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNamesTys recTy tupleTy
               <- Ghc.unsafeTcPluginTcM
                $ Ghc.newName (Ghc.mkOccName Ghc.varName "rest")
 
-            let restVarId = Ghc.mkLocalIdOrCoVar restVarName Ghc.Many restTy
+            let restVarId = Ghc.mkLocalIdOrCoVar restVarName Ghc.ManyTy' restTy
 
             (resultIds, nextExpr)
               <- processTupleTy
@@ -104,7 +104,7 @@ gatherTupleFieldsAndBuildExpr inp@MkPluginInputs{..} fieldNamesTys recTy tupleTy
                 tupleCase =
                   Ghc.mkSingleAltCase
                     (Ghc.Var tupleBind)
-                    (Ghc.mkWildValBinder Ghc.Many ty)
+                    (Ghc.mkWildValBinder Ghc.ManyTy' ty)
                     (Ghc.DataAlt $ Ghc.tupleDataCon Ghc.Boxed (length fieldTys + 1))
                     (restVarId : (fst <$> fields))
                     expr

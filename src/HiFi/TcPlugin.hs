@@ -61,7 +61,7 @@ tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
               arrBindName <- Ghc.unsafeTcPluginTcM
                            $ Ghc.newName (Ghc.mkOccName Ghc.varName "arr")
 
-              let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.Many arrType
+              let arrBind = Ghc.mkLocalIdOrCoVar arrBindName Ghc.ManyTy' arrType
                   expr = mkToRecordExpr inp recordTy recordParts arrBind 0
                   result = Ghc.mkCoreLams [arrBind] expr
               pure $ Just MkResult

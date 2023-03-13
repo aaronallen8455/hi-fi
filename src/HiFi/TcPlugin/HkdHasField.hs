@@ -17,7 +17,7 @@ mkHkdHasFieldExpr MkPluginInputs{..} recTy effectTy idx = do
   hkdName <- Ghc.unsafeTcPluginTcM
            $ Ghc.newName (Ghc.mkOccName Ghc.varName "hkd")
   let hkdTy = Ghc.mkTyConApp hkdTyCon [recTy, effectTy]
-      hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.Many hkdTy
+      hkdBndr = Ghc.mkLocalIdOrCoVar hkdName Ghc.ManyTy' hkdTy
       getterExpr =
         Ghc.mkCoreLams [hkdBndr] $
           case idx of
