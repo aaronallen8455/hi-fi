@@ -257,7 +257,9 @@ data Person =
 It's possible to have a record as a field in another record and have the inner
 record promoted to its higher kinded data version along with the parent record.
 This is done using the `NestHKD` type, which is a newtype wrapper akin to
-`Data.Functor.Identity`.
+`Data.Functor.Identity`. To avoid extraneous noise, the plugin will
+automatically wrap or unwrap `NestHKD` values, so you don't have to deal with
+the `NestHKD` constructor at the value level.
 
 ```haskell
 data Outer = Outer

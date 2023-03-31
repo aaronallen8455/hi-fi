@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE UndecidableSuperClasses #-}
@@ -63,7 +64,9 @@ type RecArray = A.Array Exts.Any
 --------------------------------------------------------------------------------
 
 -- | Marks a nested record field so that it inherits the higher kindedness of
--- the ambient record.
+-- the ambient record. To reduce extraneous noise, this type is treated
+-- specially by the plugin so that you don't need to apply it to a field when
+-- constructing a record or unwrap it when accessing the field.
 --
 -- @since 0.1.0.0
 newtype NestHKD a = NestHKD { unNestHKD :: a }
@@ -268,7 +271,7 @@ instance
 type UnsupportedRecord :: Type -> Constraint
 class UnsupportedRecord rec
 instance
-  TypeError (Text "Unsupported type for HKD promotion: '" :<>: ShowType rec :<>: Text "'."
+  TypeError (Text "Unsupported type for HKD promotion: " :<>: ShowType rec :<>: Text "."
         :$$: Text "Only record types without existentials or constraint contexts can be promoted to HKDs."
         :$$: Text "Additionally, nested HKDs are not allowed to be infinite or type family applications."
             )
@@ -278,7 +281,10 @@ type DataConNotInScope :: Type -> Constraint
 class DataConNotInScope dataCon
 instance
   TypeError (Text "Data constructor must be in scope for HKD promotion: "
-        :<>: ShowType dataCon :<>: Text "'"
+        :<>: ShowType dataCon
+#if !MIN_VERSION_ghc(9,6,0)
+        :<>: Text "'"
+#endif
             )
   => DataConNotInScope dataCon
 

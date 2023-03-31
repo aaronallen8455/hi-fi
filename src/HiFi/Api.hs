@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
@@ -57,7 +58,9 @@ module HiFi.Api
   , Compose(..)
   ) where
 
+#if !MIN_VERSION_ghc(9,6,0)
 import           Control.Applicative (liftA2)
+#endif
 import           Data.Coerce (coerce)
 import           Data.Functor.Compose (Compose(..))
 import           Data.Functor.Identity (Identity(..))

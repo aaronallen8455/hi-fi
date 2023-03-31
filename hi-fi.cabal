@@ -23,6 +23,7 @@ library
     other-modules: HiFi.GhcFacade,
                    HiFi.Api,
                    HiFi.TcPlugin,
+                   HiFi.TcPlugin.Equality,
                    HiFi.TcPlugin.FieldGetters,
                    HiFi.TcPlugin.FoldFields,
                    HiFi.TcPlugin.HkdHasField,

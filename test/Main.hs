@@ -49,6 +49,7 @@ tests = testGroup "tests"
     , testCase "setter" testSetterNested
     , testProperty "Monoid" (eq $ prop_Monoid (T @(HKD (Test7 Test2) Identity)))
     , testProperty "double nest Monoid" (eq $ prop_Monoid (T @(HKD (Test8 (Test7 Test2) Test2) Identity)))
+    , testCase "auto coerce" testAutoCoerceNest
     ]
   ]
 
@@ -536,6 +537,15 @@ testSetterNested = do
                   }
   Just testInput1 @=?
     hkdSequence (setField @"t62" (hkdDistribute $ Just testInput1) hkd).t62
+
+testAutoCoerceNest :: Assertion
+testAutoCoerceNest = do
+  let test6 :: Test6
+      test6 = Test6
+        { t61 = 9
+        , t62 = testInput1
+        }
+  test6.t62 @?= testInput1
 
 data Test1 = Test1
   { t1a :: Bool

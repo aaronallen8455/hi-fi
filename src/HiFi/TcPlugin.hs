@@ -7,10 +7,12 @@ module HiFi.TcPlugin
   ( tcPlugin
   ) where
 
+import           Control.Applicative ((<|>))
 import           Control.Monad.Trans.Except
 import           Data.Traversable (for)
 
 import qualified HiFi.GhcFacade as Ghc
+import           HiFi.TcPlugin.Equality (nestHKDEquality)
 import           HiFi.TcPlugin.FieldGetters (mkFieldGetters)
 import           HiFi.TcPlugin.FoldFields (buildFoldFieldsExpr)
 import           HiFi.TcPlugin.HkdHasField (mkHkdHasFieldExpr)
@@ -34,6 +36,25 @@ tcPlugin = Ghc.TcPlugin
 tcSolver :: PluginInputs -> Ghc.TcPluginSolver
 tcSolver inp@MkPluginInputs{..} = Ghc.adaptSolver $ \env givens wanteds -> do
   results <- for wanteds $ \case
+    ct@Ghc.CIrredCan{ cc_ev }
+      | Just (_, ty1, ty2) <- Ghc.getEqPredTys_maybe (Ghc.ctEvPred cc_ev)
+      ->
+        for (nestHKDEquality inp ty1 ty2 <|> nestHKDEquality inp ty2 ty1) $ \case
+          Left eqPred -> do
+            let ctLoc = Ghc.ctLoc ct
+            evidence <- Ghc.newWanted ctLoc eqPred
+            pure MkResult
+              { evidence = Nothing
+              , newWanted = [Ghc.mkNonCanonical evidence]
+              , subject = ct
+              }
+          Right evTerm ->
+            pure MkResult
+              { evidence = Just evTerm
+              , newWanted = []
+              , subject = ct
+              }
+
     ct@Ghc.CDictCan{ cc_class, cc_tyargs } -> do
       let clsName = Ghc.getName cc_class
 

@@ -60,6 +60,7 @@ import           GHC.HsToCore.Binds as Ghc
 import           GHC.HsToCore.Monad as Ghc hiding (newUnique)
 import           GHC.Tc.Types.Origin as Ghc
 import           GHC.Parser.Annotation as Ghc (noComments, noAnn)
+import           GHC.Builtin.Types.Prim as Ghc
 
 #elif MIN_VERSION_ghc(9,4,0)
 import           GHC as Ghc (lookupName)

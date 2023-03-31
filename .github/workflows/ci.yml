@@ -15,6 +15,7 @@ jobs:
         ghc:
           - "9.2.5"
           - "9.4.2"
+          - "9.6.1"
 
     steps:
     - uses: actions/checkout@v3
@@ -32,7 +33,7 @@ jobs:
 
     - name: Configure
       run: |
-        cabal configure --enable-tests --enable-benchmarks --enable-documentation --test-show-details=direct --write-ghc-environment-files=always
+        cabal configure --enable-tests --enable-documentation --test-show-details=direct --write-ghc-environment-files=always
 
     - name: Freeze
       run: |
@@ -47,7 +48,7 @@ jobs:
     - name: Install dependencies
       run: |
         cabal build --dependencies-only -j2 all
-        cabal build --enable-tests --enable-benchmarks --dependencies-only -j2 all
+        cabal build --enable-tests --dependencies-only -j2 all
 
     - name: Build Without Tests
       run: |
@@ -55,11 +56,11 @@ jobs:
 
     - name: Build
       run: |
-        cabal build --enable-tests --enable-benchmarks all
+        cabal build --enable-tests all
 
     - name: Test
       run: |
-        cabal test --enable-tests --enable-benchmarks all
+        cabal test --enable-tests all
 
     - name: Check
       run: |
