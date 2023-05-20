@@ -68,6 +68,28 @@ type RecArray = A.Array Exts.Any
 -- specially by the plugin so that you don't need to apply it to a field when
 -- constructing a record or unwrap it when accessing the field.
 --
+-- @
+--   data Foo = Foo { f1 :: Int, f2 :: Bool }
+--   data Bar = Bar { b1 :: NestHKD Foo, b2 :: Foo }
+--
+--   nestedHKD :: HKD Bar Maybe -> HKD Foo Maybe
+--   nestedHKD = getField @"b1"
+--
+--   unnested :: HKD Bar Maybe -> Maybe Foo
+--   unnested = getField @"b2"
+--
+--   autoUnwrap :: Bar -> Foo
+--   autoUnwrap = b1
+--
+--   autoWrap :: Foo -> Bar
+--   autoWrap foo = Bar { b1 = foo, b2 = foo}
+-- @
+--
+-- __WARNING:__ The special treatment of 'NestHKD' by the plugin can possibly
+-- result in unsoundness if it is used for things other than simply tagging a
+-- field in a record. Specifically, it should __not__ be used in a phantom type
+-- parameter position.
+--
 -- @since 0.1.0.0
 newtype NestHKD a = NestHKD { unNestHKD :: a }
   deriving newtype
